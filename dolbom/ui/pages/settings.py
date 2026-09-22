@@ -5,14 +5,16 @@ import uuid
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -29,8 +31,13 @@ class SettingsPage(QWidget):
     def __init__(self, services: AppServices):
         super().__init__()
         self.services = services
-        root = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        root = QVBoxLayout(inner)
         root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
 
         title = QLabel("설정")
         title.setObjectName("sectionTitle")
@@ -38,7 +45,11 @@ class SettingsPage(QWidget):
 
         net = QFrame()
         net.setObjectName("card")
-        nf = QFormLayout(net)
+        net.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        nv = QVBoxLayout(net)
+        nv.setSpacing(8)
+        head = QLabel("연결")
+        head.setObjectName("sectionTitle")
         self.demo = QCheckBox("데모 모드 (합성 영상 · 실제 카메라와 혼동하지 마세요)")
         self.demo.setChecked(services.store.demo_mode())
         self.use_rx = QCheckBox("로컬 시험 수신기 사용 (메인 서버가 아닙니다)")
@@ -50,17 +61,28 @@ class SettingsPage(QWidget):
         self.udp = QSpinBox()
         self.udp.setRange(1024, 65535)
         self.udp.setValue(int(services.store.get_meta("udp_port", "45004")))
+        self.tcp.setMaximumWidth(140)
+        self.udp.setMaximumWidth(140)
+        for field in (self.host, self.tcp, self.udp):
+            field.setMinimumHeight(40)
+            field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.sound = QCheckBox("중요 알림 소리")
         self.sound.setChecked(services.store.get_meta("alert_sound", "1") == "1")
         save = make_button("연결 설정 저장", "primary", "저장 후 제어 채널과 영상 전송 주소를 다시 적용합니다.")
         save.clicked.connect(self._save_net)
-        nf.addRow(self.demo)
-        nf.addRow(self.use_rx)
-        nf.addRow("서버 주소", self.host)
-        nf.addRow("TCP 제어 포트", self.tcp)
-        nf.addRow("UDP 영상 포트", self.udp)
-        nf.addRow(self.sound)
-        nf.addRow(save)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
+        lab_host = QLabel("서버 주소")
+        lab_tcp = QLabel("TCP 제어 포트")
+        lab_udp = QLabel("UDP 영상 포트")
+        grid.addWidget(lab_host, 0, 0)
+        grid.addWidget(self.host, 0, 1)
+        grid.addWidget(lab_tcp, 1, 0)
+        grid.addWidget(self.tcp, 1, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+        grid.addWidget(lab_udp, 2, 0)
+        grid.addWidget(self.udp, 2, 1, alignment=Qt.AlignmentFlag.AlignLeft)
+        grid.setColumnStretch(1, 1)
         proto_note = QLabel(
             f"제어 프로토콜은 초안 v{proto.PROTOCOL_VERSION}입니다. "
             "기존 메인 서버 규격이 없어 시험 수신기로만 검증합니다. "
@@ -68,7 +90,13 @@ class SettingsPage(QWidget):
         )
         proto_note.setObjectName("muted")
         proto_note.setWordWrap(True)
-        nf.addRow(proto_note)
+        nv.addWidget(head)
+        nv.addWidget(self.demo)
+        nv.addWidget(self.use_rx)
+        nv.addLayout(grid)
+        nv.addWidget(self.sound)
+        nv.addWidget(save, alignment=Qt.AlignmentFlag.AlignLeft)
+        nv.addWidget(proto_note)
 
         people = QFrame()
         people.setObjectName("card")
@@ -77,6 +105,7 @@ class SettingsPage(QWidget):
         hint = QLabel("이름과 병실만 저장합니다. 상세 의료정보는 다루지 않습니다.")
         hint.setObjectName("muted")
         self.plist = QListWidget()
+        self.plist.setMinimumHeight(110)
         row = QHBoxLayout()
         self.pname = QLineEdit()
         self.pname.setPlaceholderText("이름")
@@ -120,12 +149,18 @@ class SettingsPage(QWidget):
         hl = QVBoxLayout(hist)
         hl.addWidget(QLabel("최근 세션 이력"))
         self.hist = QListWidget()
+        self.hist.setMinimumHeight(110)
         hl.addWidget(self.hist)
 
         root.addWidget(net)
         root.addWidget(people)
         root.addWidget(tests)
-        root.addWidget(hist, 1)
+        root.addWidget(hist)
+        root.addStretch(1)
+        scroll.setWidget(inner)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
         self.reload()
 
     def reload(self) -> None:

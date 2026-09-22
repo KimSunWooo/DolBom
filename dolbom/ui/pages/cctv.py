@@ -116,12 +116,14 @@ class _CameraCard(QFrame):
             and not latest_msg.acknowledged
         ):
             alert = True
+        extra = ""
+        if (cam.source_kind == "demo" or self.services.cameras.demo_forced()) and status != CAM_DEMO:
+            extra = " · 데모"
         self.surface.set_overlay(
             title=f"{cam.name} · {cam.location}",
-            status=label + (" · 데모" if cam.source_kind == "demo" or self.services.cameras.demo_forced() else ""),
-            disconnected=status in (CAM_DISCONNECTED, CAM_RECONNECTING) and not (
-                cam.source_kind == "demo" or self.services.cameras.demo_forced()
-            ),
+            status=label + extra,
+            disconnected=status in (CAM_DISCONNECTED, CAM_RECONNECTING)
+            and not (cam.source_kind == "demo" or self.services.cameras.demo_forced()),
             last_seen=last_seen,
             alert=alert,
         )

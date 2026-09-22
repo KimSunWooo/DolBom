@@ -466,3 +466,5 @@ class ExercisePage(QWidget):
     def _playing(self, playing: bool) -> None:
         self.play_btn.setEnabled(not playing)
         self.pause_btn.setEnabled(playing)
+        if playing:
+            self.player_status.setText("표준 영상을 재생 중입니다. 이 영상은 서버로 보내지 않습니다.")

@@ -13,6 +13,8 @@ def test_gui_navigation_keeps_cctv(tmp_path):
     app = QApplication.instance() or QApplication([])
     apply_theme(app)
     services = AppServices()
+    services.store.set_meta("tcp_port", "46757")
+    services.store.set_meta("udp_port", "46004")
     services.start()
     win = MainWindow(services)
     win.show()

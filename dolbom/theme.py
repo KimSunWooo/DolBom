@@ -117,6 +117,7 @@ def stylesheet() -> str:
     QPushButton:disabled {{
         color: #9AA3AB;
         background: {SURFACE_2};
+        border: 1px solid {LINE};
     }}
     QPushButton[kind="primary"] {{
         background: {TEAL};
@@ -126,10 +127,20 @@ def stylesheet() -> str:
     QPushButton[kind="primary"]:hover {{
         background: {TEAL_DEEP};
     }}
+    QPushButton[kind="primary"]:disabled {{
+        background: #A9C4C9;
+        color: #F7FBFC;
+        border: 1px solid #A9C4C9;
+    }}
     QPushButton[kind="danger"] {{
         background: {SURFACE};
         color: {URGENT};
         border: 1px solid {URGENT};
+    }}
+    QPushButton[kind="danger"]:disabled {{
+        color: #B7A9A6;
+        background: {SURFACE_2};
+        border: 1px solid {LINE};
     }}
     QPushButton[kind="nav"] {{
         text-align: left;
@@ -147,12 +158,20 @@ def stylesheet() -> str:
         background: {TEAL};
         color: #FFFFFF;
     }}
-    QLineEdit, QComboBox, QPlainTextEdit, QSpinBox, QTextEdit {{
+    QLineEdit, QComboBox, QSpinBox {{
         background: #FFFFFF;
         border: 1px solid {LINE};
         border-radius: 8px;
         padding: 8px 10px;
         min-height: 38px;
+        selection-background-color: {TEAL_SOFT};
+    }}
+    QPlainTextEdit, QTextEdit {{
+        background: #FFFFFF;
+        border: 1px solid {LINE};
+        border-radius: 8px;
+        padding: 8px 10px;
+        min-height: 72px;
         selection-background-color: {TEAL_SOFT};
     }}
     QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus, QSpinBox:focus {{
@@ -219,6 +238,10 @@ def stylesheet() -> str:
         border: none;
         padding: 6px 8px;
         font-size: 13px;
+    }}
+    QScrollArea {{
+        border: none;
+        background: {BG};
     }}
     QTabWidget::pane {{
         border: 1px solid {LINE};

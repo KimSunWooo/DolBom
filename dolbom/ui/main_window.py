@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from PyQt6.QtCore import QSize, Qt, QTimer, QUrl
+from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QFrame,
@@ -122,6 +122,7 @@ class MainWindow(QMainWindow):
         self._refresh_messages()
         self._refresh_banner()
         self._bind_shortcuts()
+        self._tick()
 
     def _bind_shortcuts(self) -> None:
         mapping = [("cctv", "Ctrl+1"), ("exercise", "Ctrl+2"), ("gait", "Ctrl+3"), ("settings", "Ctrl+4")]

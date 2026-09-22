@@ -102,6 +102,8 @@ class TestReceiver:
                     chunk = conn.recv(8192)
                 except socket.timeout:
                     continue
+                except OSError:
+                    break
                 if not chunk:
                     break
                 buf.extend(chunk)
