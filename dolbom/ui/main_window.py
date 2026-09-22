@@ -31,8 +31,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.services = services
         self.setWindowTitle("돌봄(DolBom)")
-        self.setMinimumSize(QSize(1180, 740))
-        self.resize(1360, 860)
+        self.setMinimumSize(QSize(1280, 780))
+        self.resize(1480, 900)
 
         root = QWidget()
         self.setCentralWidget(root)

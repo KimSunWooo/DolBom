@@ -202,8 +202,8 @@ class ExercisePage(QWidget):
         pl.addLayout(actions)
 
         root.addLayout(head)
-        root.addLayout(mid, 3)
-        root.addWidget(plist, 2)
+        root.addLayout(mid, 5)
+        root.addWidget(plist, 1)
 
         self.player.frame_ready.connect(lambda f: self.std_view.set_frame(f))
         self.player.status_text.connect(self.player_status.setText)
