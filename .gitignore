@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+*.db
+*.sqlite
+*.log
+dist/
+build/
+.DS_Store
+/data/
+/workspace/.dolbom-data/
+*.pyc
