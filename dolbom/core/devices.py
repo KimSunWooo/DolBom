@@ -119,8 +119,8 @@ def _v4l_maps() -> tuple[dict[str, str], dict[str, str]]:
     return by_id, by_path
 
 
-def _query_capture(path: str) -> tuple[bool, str, str]:
-    """(is_capture, card_name, bus_info). ioctl 실패 시 이름 추정."""
+def _query_capture(path: str) -> tuple[Optional[bool], str, str]:
+    """(is_capture, card_name, bus_info). ioctl 실패 시 is_capture=None."""
     name = ""
     bus = ""
     try:
@@ -139,8 +139,10 @@ def _query_capture(path: str) -> tuple[bool, str, str]:
             ]
 
         V4L2_CAP_VIDEO_CAPTURE = 0x00000001
-        # _IOWR('V', 0, struct) — 64-bit Linux
-        VIDIOC_QUERYCAP = 0x80685600
+        V4L2_CAP_VIDEO_CAPTURE_MPLANE = 0x00001000
+        V4L2_CAP_META_CAPTURE = 0x00800000
+        # _IOWR('V', 0, struct v4l2_capability) — 64-bit Linux, size 104
+        VIDIOC_QUERYCAP = 0xC0685600
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
         try:
             c = cap()
@@ -148,11 +150,21 @@ def _query_capture(path: str) -> tuple[bool, str, str]:
             name = c.card.decode("utf-8", "ignore").strip()
             bus = c.bus_info.decode("utf-8", "ignore").strip()
             flags = c.device_caps or c.capabilities
-            return bool(flags & V4L2_CAP_VIDEO_CAPTURE), name, bus
+            meta_only = bool(flags & V4L2_CAP_META_CAPTURE) and not (
+                flags & (V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VIDEO_CAPTURE_MPLANE)
+            )
+            is_cap = bool(flags & (V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_VIDEO_CAPTURE_MPLANE))
+            if meta_only:
+                is_cap = False
+            return is_cap, name, bus
         finally:
             os.close(fd)
+    except OSError as exc:
+        log.info("v4l querycap failed path=%s err=%s", path, exc)
+        return None, name, bus
     except Exception:
-        return True, name, bus
+        log.info("v4l querycap failed path=%s", path, exc_info=True)
+        return None, name, bus
 
 
 def list_linux_endpoints() -> list[Endpoint]:
@@ -173,9 +185,13 @@ def list_linux_endpoints() -> list[Endpoint]:
         except OSError:
             parent = ""
         is_meta = "meta" in sysname.lower() or "touch" in sysname.lower()
-        is_cap, card, bus = _query_capture(node)
+        queried, card, bus = _query_capture(node)
         if is_meta:
             is_cap = False
+        elif queried is None:
+            is_cap = True
+        else:
+            is_cap = queried
         real = os.path.realpath(node)
         found.append(
             Endpoint(
@@ -225,7 +241,7 @@ def group_physical(endpoints: Iterable[Endpoint]) -> list[PhysicalDevice]:
                 connected=os.path.exists(open_path) or os.path.exists(primary.path),
                 endpoint_count=len(eps),
                 extra_note=note,
-                aliases=[e.path for e in eps],
+                aliases=[e.path for e in capture],
             )
         )
     for dev in devices:
@@ -284,15 +300,17 @@ def find_device(devices: list[PhysicalDevice], stable_id: str) -> Optional[Physi
 
 
 def _identity(ep: Endpoint) -> tuple[str, str, bool]:
-    """(stable_id, open_path, unique). 인덱스는 재시작 후 바뀔 수 있어 안정 ID가 아니면 unique=False."""
+    """(stable_id, open_path, unique).
+
+    안정 ID(by-id)와 실제 캡처 입력(/dev/videoN)을 분리한다.
+    OpenCV에는 심볼릭 링크가 아니라 캡처 노드를 넘긴다.
+    """
     if ep.by_id:
         sid = ep.by_id if ep.by_id.startswith("/") else f"/dev/v4l/by-id/{ep.by_id}"
-        path = sid if os.path.exists(sid) else ep.path
-        return sid, path, True
+        return sid, ep.path, True
     if ep.by_path:
         sid = ep.by_path if ep.by_path.startswith("/") else f"/dev/v4l/by-path/{ep.by_path}"
-        path = sid if os.path.exists(sid) else ep.path
-        return sid, path, True
+        return sid, ep.path, True
     return f"unstable:index:{ep.index}", ep.path, False
 
 
@@ -306,11 +324,63 @@ def _id_match(a: str, b: str) -> bool:
     return False
 
 
+def _capture_node(path: str) -> str:
+    """심볼릭 링크를 실제 /dev/videoN 캡처 노드로 푼다. 목록 순번을 인덱스로 쓰지 않는다."""
+    if not path:
+        return ""
+    candidate = path
+    if os.path.exists(path):
+        candidate = os.path.realpath(path)
+    base = os.path.basename(candidate)
+    if base.startswith("video") and candidate.startswith("/dev/"):
+        return candidate
+    return ""
+
+
+def describe_device_access(path: str) -> str:
+    """열기 전 권한·점유를 errno로 구분한다. 빈 문자열이면 파일은 열 수 있다."""
+    import errno
+
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+        os.close(fd)
+        return ""
+    except FileNotFoundError:
+        return f"장치 파일이 없습니다 ({path})"
+    except PermissionError:
+        return "카메라에 접근할 권한이 없습니다. 사용자를 video 그룹에 넣고 다시 로그인하세요."
+    except OSError as exc:
+        if exc.errno == errno.EBUSY:
+            return "다른 프로그램이 이 카메라를 사용 중입니다. 미리보기나 다른 앱을 종료하세요."
+        return f"장치를 열 수 없습니다: {exc.strerror}"
+
+
+def capture_targets(camera) -> tuple[list[str], str, str]:
+    """안정 ID로 현재 캡처 노드 목록을 만든다. 첫 항목이 주 입력."""
+    source, state, detail = resolve_open_source(camera)
+    paths: list[str] = []
+    if isinstance(source, str) and source:
+        node = _capture_node(source) or source
+        paths.append(node)
+    try:
+        devices = list_local_devices()
+    except Exception:
+        devices = []
+    hit = find_device(devices, camera.device_id or "")
+    if hit:
+        for p in [hit.open_path, *hit.aliases]:
+            node = _capture_node(p) or p
+            if node and node not in paths:
+                paths.append(node)
+    return paths, state, detail
+
+
 def resolve_open_source(camera) -> tuple[object, str, str]:
     """저장된 할당으로 열 소스. 인덱스로 추측해 잘못된 카메라를 열지 않는다.
 
     Returns:
         (source, match_state, detail). source=None 이면 열지 말 것.
+        로컬 장치는 /dev/videoN 캡처 노드를 반환한다 (by-id 링크가 아님).
     """
     from dolbom.models import (
         MATCH_AMBIGUOUS,
@@ -333,9 +403,6 @@ def resolve_open_source(camera) -> tuple[object, str, str]:
     path = camera.device_path or ""
     if device_id.startswith("unstable:"):
         return None, MATCH_UNSTABLE, "안정적인 장치 ID가 없어 다시 선택해야 합니다."
-    for candidate in (device_id, path):
-        if candidate.startswith("/dev/v4l/") and os.path.exists(candidate):
-            return candidate, MATCH_OK, ""
     try:
         devices = list_local_devices()
     except Exception:
@@ -345,6 +412,9 @@ def resolve_open_source(camera) -> tuple[object, str, str]:
         return hits[0].open_path, MATCH_OK, ""
     if len(hits) > 1:
         return None, MATCH_AMBIGUOUS, "같은 식별자의 장치가 여러 대입니다. 다시 선택하세요."
+    node = _capture_node(path) or _capture_node(device_id)
+    if node and os.path.exists(node):
+        return node, MATCH_OK, ""
     if device_id:
         return None, MATCH_MISSING, "저장된 장치를 찾지 못했습니다. 다시 선택하세요."
     return None, MATCH_UNSET, "장치가 아직 지정되지 않았습니다."

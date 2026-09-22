@@ -269,7 +269,7 @@ class DevicePickerDialog(QDialog):
         self._preview_worker = None
         if worker:
             worker.stop()
-            worker.wait(1200)
+            worker.wait(2500)
 
     def _choose(self) -> None:
         dev = self._current_device()
@@ -281,6 +281,7 @@ class DevicePickerDialog(QDialog):
                 "케이블을 바꾸거나 네트워크 카메라 경로를 사용하세요."
             )
             return
+        self._stop_temp_preview()
         ok, reason = self.services.assign_device(self.camera.id, dev)
         if not ok:
             self.detail.setText(reason)

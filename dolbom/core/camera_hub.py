@@ -54,8 +54,22 @@ class CameraHub(QObject):
             return
         existing = self._workers.get(camera.id)
         if existing and existing.isRunning():
-            existing.update_camera(camera, self._demo_forced)
-            return
+            same = (
+                existing.camera.device_path == camera.device_path
+                and existing.camera.source_kind == camera.source_kind
+                and existing.camera.source_value == camera.source_value
+                and existing.camera.device_id == camera.device_id
+                and existing.demo_forced == self._demo_forced
+            )
+            if same:
+                existing.update_camera(camera, self._demo_forced)
+                return
+            log.info(
+                "capture reopen camera=%s old_input=%s new_input=%s",
+                camera.id,
+                existing.camera.device_path,
+                camera.device_path,
+            )
         self._start_worker(camera)
 
     def _start_worker(self, camera: Camera) -> None:
@@ -64,10 +78,15 @@ class CameraHub(QObject):
         worker.frame_ready.connect(self._on_frame)
         worker.status_changed.connect(self._on_status)
         self._workers[camera.id] = worker
+        log.info("hub start worker camera=%s name=%s demo_forced=%s", camera.id, camera.name, self._demo_forced)
         worker.start()
 
     def _on_frame(self, frame: VideoFrame) -> None:
+        first = frame.camera_id not in self._latest
         self._latest[frame.camera_id] = frame
+        if first:
+            h, w = frame.bgr.shape[:2]
+            log.info("hub first frame camera=%s size=%sx%s", frame.camera_id, w, h)
         self.frame_ready.emit(frame)
 
     def _on_status(self, camera_id: str, status: str, detail: str) -> None:
@@ -78,6 +97,7 @@ class CameraHub(QObject):
         worker = self._workers.pop(camera_id, None)
         if worker is None:
             return
+        log.info("hub stop worker camera=%s", camera_id)
         worker.stop()
         if not worker.wait(2500):
             log.warning("capture thread did not stop in time id=%s", camera_id)

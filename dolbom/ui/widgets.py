@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Optional
 
@@ -28,11 +29,26 @@ from dolbom.models import (
 )
 from dolbom.theme import INK, INK_MUTED, LINE, OK, TEAL, TEAL_DEEP, URGENT, VIDEO_BG, WARN, set_kind
 
+log = logging.getLogger("dolbom.ui.video")
+
 
 def bgr_to_qimage(bgr: np.ndarray) -> QImage:
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    h, w, ch = rgb.shape
-    return QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
+    if bgr is None or getattr(bgr, "size", 0) == 0:
+        return QImage()
+    frame = np.ascontiguousarray(bgr)
+    if frame.ndim == 2:
+        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    elif frame.ndim != 3:
+        return QImage()
+    channels = frame.shape[2]
+    if channels == 4:
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+    elif channels != 3:
+        return QImage()
+    bgra = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA))
+    h, w = bgra.shape[:2]
+    qimg = QImage(bgra.data, w, h, int(bgra.strides[0]), QImage.Format.Format_RGB32)
+    return qimg.copy()
 
 
 def make_button(text: str, kind: str | None = None, tooltip: str = "") -> QPushButton:
@@ -98,6 +114,7 @@ class VideoSurface(QWidget):
         self._disconnected = False
         self._last_seen = 0.0
         self._alert = False
+        self._logged_first = False
         self.setMinimumSize(240, 160)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -109,7 +126,20 @@ class VideoSurface(QWidget):
         self.update()
 
     def set_frame(self, bgr: np.ndarray) -> None:
-        self._image = bgr_to_qimage(bgr)
+        image = bgr_to_qimage(bgr)
+        if image.isNull():
+            if not self._logged_first:
+                log.info("ui frame convert failed widget=%s", self._overlay_title or self._placeholder)
+            return
+        if not self._logged_first:
+            self._logged_first = True
+            log.info(
+                "ui first frame widget=%s size=%sx%s",
+                self._overlay_title or self._placeholder,
+                image.width(),
+                image.height(),
+            )
+        self._image = image
         self.update()
 
     def set_qimage(self, image: QImage) -> None:

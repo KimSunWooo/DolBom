@@ -198,7 +198,7 @@ MODE_LABELS = {
 }
 
 CAM_STATUS_LABELS = {
-    CAM_PREPARING: "연결 준비 중",
+    CAM_PREPARING: "연결 중",
     CAM_PREVIEW: "미리보기 중",
     CAM_SENDING: "서버 전송 중",
     CAM_DISCONNECTED: "연결 끊김",
