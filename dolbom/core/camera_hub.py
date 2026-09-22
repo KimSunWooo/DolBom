@@ -9,6 +9,7 @@ from typing import Optional
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from dolbom.core.capture import CaptureWorker
+from dolbom.core.devices import _id_match
 from dolbom.db.store import Store
 from dolbom.models import CAM_DISABLED, CAM_PREPARING, Camera, VideoFrame
 
@@ -90,6 +91,20 @@ class CameraHub(QObject):
     def restart_all(self) -> None:
         self.stop_all()
         self.start_enabled()
+
+    def camera_id_for_device(self, stable_id: str) -> Optional[str]:
+        if not stable_id:
+            return None
+        for cam in self.store.list_cameras():
+            if cam.device_id and _id_match(cam.device_id, stable_id) and self.is_running(cam.id):
+                return cam.id
+        return None
+
+    def reopen(self, camera_id: str) -> None:
+        """장치 변경 후 기존 워커를 끄고 다시 연다."""
+        self.stop_one(camera_id)
+        self._latest.pop(camera_id, None)
+        self.reload_camera(camera_id)
 
     def reload_camera(self, camera_id: str) -> None:
         cam = self.store.get_camera(camera_id)

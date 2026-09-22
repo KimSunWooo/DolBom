@@ -83,6 +83,7 @@ class MessageCenter(QObject):
         content = str(payload.get("content") or payload.get("message") or "서버 메시지")
         if is_test and not content.startswith("[시험]"):
             content = f"[시험] {content}"
+        # 신원이 확인되지 않은 서버 이벤트에 환자를 붙이지 않는다.
         self.add(
             severity=severity,
             content=content,

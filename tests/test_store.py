@@ -16,20 +16,24 @@ from dolbom.models import (
 def test_seed_and_camera_crud(tmp_path: Path):
     store = Store(tmp_path / "t.db")
     cams = store.list_cameras()
-    assert len(cams) == 2
+    assert len(cams) == 3
+    roles = {c.role for c in cams}
+    assert "cctv_1" in roles and "cctv_2" in roles and "clinical" in roles
     extra = Camera(
-        id="cam-3",
-        name="3번 카메라",
+        id="cam-extra",
+        name="병실 CCTV 3",
         location="205호",
         source_kind=SOURCE_DEMO,
-        source_value="green",
+        source_value="purple",
         sort_order=store.next_camera_sort(),
+        role=store.next_cctv_role(),
     )
     store.save_camera(extra)
-    assert len(store.list_cameras()) == 3
+    assert extra.role == "cctv_3"
+    assert len(store.list_cameras()) == 4
     extra.enabled = False
     store.save_camera(extra)
-    assert len(store.list_cameras(include_disabled=False)) == 2
+    assert len(store.list_cameras(include_disabled=False)) == 3
 
 
 def test_playlist_persists(tmp_path: Path):

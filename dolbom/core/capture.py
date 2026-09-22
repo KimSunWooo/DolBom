@@ -11,14 +11,18 @@ import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from dolbom.core.demo_frames import make_demo_frame
+from dolbom.core.devices import resolve_open_source
 from dolbom.models import (
     CAM_DEMO,
     CAM_DISCONNECTED,
     CAM_PREPARING,
     CAM_PREVIEW,
     CAM_RECONNECTING,
+    MATCH_MISSING,
+    MATCH_UNSET,
+    MATCH_UNSTABLE,
     SOURCE_DEMO,
-    SOURCE_DEVICE,
+    SOURCE_RTSP,
     Camera,
     VideoFrame,
 )
@@ -39,6 +43,7 @@ class CaptureWorker(QThread):
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame_no = 0
         self._fail_count = 0
+        self._match_detail = ""
 
     def stop(self) -> None:
         self._running = False
@@ -48,20 +53,27 @@ class CaptureWorker(QThread):
         self.demo_forced = demo_forced
 
     def _use_demo(self) -> bool:
-        return self.demo_forced or self.camera.source_kind == SOURCE_DEMO
+        if self.demo_forced:
+            return True
+        if self.camera.source_kind == SOURCE_DEMO:
+            return True
+        if (self.camera.device_id or "").startswith("demo:"):
+            return True
+        return False
+
+    def _open_source(self) -> int | str | None:
+        source, state, detail = resolve_open_source(self.camera)
+        self.camera.match_state = state
+        self._match_detail = detail
+        return source
 
     def _open(self) -> bool:
         self._release()
         if self._use_demo():
             return True
-        source: int | str
-        if self.camera.source_kind == SOURCE_DEVICE:
-            try:
-                source = int(self.camera.source_value)
-            except ValueError:
-                source = self.camera.source_value
-        else:
-            source = self.camera.source_value
+        source = self._open_source()
+        if source is None or source == "":
+            return False
         try:
             cap = cv2.VideoCapture(source)
             if not cap.isOpened():
@@ -86,10 +98,13 @@ class CaptureWorker(QThread):
     def _read(self) -> Optional[np.ndarray]:
         if self._use_demo():
             self._frame_no += 1
+            key = self.camera.source_value
+            if (self.camera.device_id or "").startswith("demo:"):
+                key = self.camera.device_id.split(":", 1)[-1]
             return make_demo_frame(
                 camera_name=self.camera.name,
                 location=self.camera.location,
-                source_key=self.camera.source_value or "warm",
+                source_key=key or "warm",
                 frame_no=self._frame_no,
             )
         if self._cap is None:
@@ -105,9 +120,10 @@ class CaptureWorker(QThread):
         self.status_changed.emit(self.camera.id, status, "카메라를 여는 중")
         opened = self._open()
         if not opened:
-            self.status_changed.emit(
-                self.camera.id, CAM_DISCONNECTED, "장치에 연결하지 못했습니다"
-            )
+            reason = getattr(self, "_match_detail", "") or "장치에 연결하지 못했습니다"
+            if self.camera.match_state in (MATCH_MISSING, MATCH_UNSTABLE, MATCH_UNSET):
+                reason = reason or "저장된 장치를 열 수 없습니다. 다시 선택하세요."
+            self.status_changed.emit(self.camera.id, CAM_DISCONNECTED, reason)
         else:
             live = CAM_DEMO if self._use_demo() else CAM_PREVIEW
             self.status_changed.emit(self.camera.id, live, "")

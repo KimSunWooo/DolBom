@@ -9,6 +9,21 @@ SOURCE_DEMO = "demo"
 SOURCE_DEVICE = "device"
 SOURCE_RTSP = "rtsp"
 
+ROLE_CLINICAL = "clinical"
+ROLE_CCTV_PREFIX = "cctv_"
+
+COND_LISTED = "listed"
+COND_NONE = "none"
+COND_UNKNOWN = "unknown"
+
+MISSING = "미등록"
+
+MATCH_OK = "ok"
+MATCH_MISSING = "missing"
+MATCH_AMBIGUOUS = "ambiguous"
+MATCH_UNSET = "unset"
+MATCH_UNSTABLE = "unstable"
+
 PLAYLIST_LOCAL = "local"
 PLAYLIST_HTTPS = "https"
 
@@ -41,6 +56,26 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def role_label(role: str) -> str:
+    if role == ROLE_CLINICAL:
+        return "운동·보행 공용"
+    if role.startswith(ROLE_CCTV_PREFIX):
+        suffix = role[len(ROLE_CCTV_PREFIX) :]
+        return f"병실 CCTV {suffix}" if suffix else "병실 CCTV"
+    return role or "미지정"
+
+
+def next_cctv_role(existing_roles: list[str]) -> str:
+    nums = []
+    for role in existing_roles:
+        if role.startswith(ROLE_CCTV_PREFIX):
+            try:
+                nums.append(int(role[len(ROLE_CCTV_PREFIX) :]))
+            except ValueError:
+                continue
+    return f"{ROLE_CCTV_PREFIX}{max(nums) + 1 if nums else 1}"
+
+
 @dataclass
 class Camera:
     id: str
@@ -50,15 +85,26 @@ class Camera:
     source_value: str
     enabled: bool = True
     sort_order: int = 0
+    role: str = ""
+    device_id: str = ""
+    device_path: str = ""
+    device_name: str = ""
+    match_state: str = MATCH_UNSET
 
     def display_source(self) -> str:
         if self.source_kind == SOURCE_DEMO:
             return "데모 영상"
-        if self.source_kind == SOURCE_DEVICE:
-            return f"장치 {self.source_value}"
         if self.source_kind == SOURCE_RTSP:
             return mask_secret(self.source_value)
+        if self.device_name:
+            ident = self.device_id[-24:] if self.device_id else ""
+            return f"{self.device_name}" + (f" · {ident}" if ident else "")
+        if self.source_kind == SOURCE_DEVICE:
+            return f"장치 인덱스 {self.source_value} (불안정)"
         return self.source_kind
+
+    def role_text(self) -> str:
+        return role_label(self.role)
 
 
 @dataclass
@@ -66,6 +112,13 @@ class Patient:
     id: str
     display_name: str
     room: str = ""
+    birth_date: Optional[str] = None
+    age_years: Optional[int] = None
+    age_as_of: Optional[str] = None
+    admitted_on: Optional[str] = None
+    hospitalized_on: Optional[str] = None
+    conditions: list[str] = field(default_factory=list)
+    conditions_status: str = COND_UNKNOWN
 
 
 @dataclass

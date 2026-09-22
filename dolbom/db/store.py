@@ -9,14 +9,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 from dolbom.models import (
+    MATCH_UNSET,
     PLAYLIST_LOCAL,
+    ROLE_CLINICAL,
     SOURCE_DEMO,
     AppMessage,
     Camera,
     Patient,
     PlaylistItem,
     SessionRecord,
-    now_iso,
+    next_cctv_role,
 )
 
 
@@ -83,6 +85,7 @@ class Store:
         db_file.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_file), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._lock = threading.Lock()
         self.init_schema()
         self.seed_if_empty()
@@ -102,32 +105,124 @@ class Store:
                 "INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
                 ("schema_version", "1"),
             )
+            self._migrate_camera_columns()
             self._conn.commit()
+
+    def _migrate_camera_columns(self) -> None:
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(cameras)").fetchall()}
+        for name, decl in (
+            ("role", "TEXT NOT NULL DEFAULT ''"),
+            ("device_id", "TEXT NOT NULL DEFAULT ''"),
+            ("device_path", "TEXT NOT NULL DEFAULT ''"),
+            ("device_name", "TEXT NOT NULL DEFAULT ''"),
+        ):
+            if name not in cols:
+                self._conn.execute(f"ALTER TABLE cameras ADD COLUMN {name} {decl}")
+        self._conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)",
+            ("schema_version", "2"),
+        )
+
+    def _ensure_camera_roles(self) -> None:
+        rows = self._conn.execute(
+            "SELECT id, name, source_kind, source_value, sort_order, role FROM cameras ORDER BY sort_order, name"
+        ).fetchall()
+        if not rows:
+            return
+        cctv_assigned = 0
+        has_clinical = False
+        for row in rows:
+            role = row["role"] or ""
+            if role == ROLE_CLINICAL:
+                has_clinical = True
+                continue
+            if role.startswith("cctv_"):
+                continue
+            cctv_assigned += 1
+            new_role = f"cctv_{cctv_assigned}"
+            device_id = device_path = device_name = ""
+            if row["source_kind"] == SOURCE_DEMO:
+                device_id = f"demo:{row['source_value'] or 'warm'}"
+                device_path = device_id
+                device_name = "데모 영상"
+            self._conn.execute(
+                "UPDATE cameras SET role = ?, device_id = ?, device_path = ?, device_name = ? WHERE id = ?",
+                (new_role, device_id, device_path, device_name, row["id"]),
+            )
+        if not has_clinical:
+            self._conn.execute(
+                "INSERT INTO cameras(id, name, location, source_kind, source_value, enabled, sort_order, "
+                "role, device_id, device_path, device_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    _uid(),
+                    "운동·보행 카메라",
+                    "재활실",
+                    SOURCE_DEMO,
+                    "green",
+                    1,
+                    90,
+                    ROLE_CLINICAL,
+                    "demo:green",
+                    "demo:green",
+                    "데모 카메라 C",
+                ),
+            )
 
     def seed_if_empty(self) -> None:
         with self._lock:
             n = self._conn.execute("SELECT COUNT(*) FROM cameras").fetchone()[0]
             if n == 0:
                 rows = [
-                    (_uid(), "1번 카메라", "101호 병실", SOURCE_DEMO, "warm", 1, 0),
-                    (_uid(), "2번 카메라", "복도 A", SOURCE_DEMO, "cool", 1, 1),
+                    (
+                        _uid(),
+                        "병실 CCTV 1",
+                        "101호",
+                        SOURCE_DEMO,
+                        "warm",
+                        1,
+                        0,
+                        "cctv_1",
+                        "demo:warm",
+                        "demo:warm",
+                        "데모 카메라 A",
+                    ),
+                    (
+                        _uid(),
+                        "병실 CCTV 2",
+                        "102호",
+                        SOURCE_DEMO,
+                        "cool",
+                        1,
+                        1,
+                        "cctv_2",
+                        "demo:cool",
+                        "demo:cool",
+                        "데모 카메라 B",
+                    ),
+                    (
+                        _uid(),
+                        "운동·보행 카메라",
+                        "재활실",
+                        SOURCE_DEMO,
+                        "green",
+                        1,
+                        90,
+                        ROLE_CLINICAL,
+                        "demo:green",
+                        "demo:green",
+                        "데모 카메라 C",
+                    ),
                 ]
                 self._conn.executemany(
-                    "INSERT INTO cameras(id, name, location, source_kind, source_value, enabled, sort_order) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO cameras(id, name, location, source_kind, source_value, enabled, sort_order, "
+                    "role, device_id, device_path, device_name) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     rows,
                 )
             n = self._conn.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
             if n == 0:
-                rows = [
-                    (_uid(), "김영희", "101호"),
-                    (_uid(), "박철수", "102호"),
-                    (_uid(), "이순자", "103호"),
-                ]
-                self._conn.executemany(
-                    "INSERT INTO patients(id, display_name, room) VALUES (?, ?, ?)",
-                    rows,
-                )
+                # 레거시 테이블은 비워 둔다. 환자 조회는 PatientRepository 를 쓴다.
+                pass
             self._conn.execute(
                 "INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
                 ("demo_mode", "1"),
@@ -156,6 +251,7 @@ class Store:
                 "INSERT OR IGNORE INTO meta(key, value) VALUES(?, ?)",
                 ("client_id", _uid()),
             )
+            self._ensure_camera_roles()
             self._conn.commit()
 
     def get_meta(self, key: str, default: str = "") -> str:
@@ -203,10 +299,13 @@ class Store:
     def save_camera(self, cam: Camera) -> None:
         with self._lock:
             self._conn.execute(
-                "INSERT INTO cameras(id, name, location, source_kind, source_value, enabled, sort_order) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+                "INSERT INTO cameras(id, name, location, source_kind, source_value, enabled, sort_order, "
+                "role, device_id, device_path, device_name) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
                 "name=excluded.name, location=excluded.location, source_kind=excluded.source_kind, "
-                "source_value=excluded.source_value, enabled=excluded.enabled, sort_order=excluded.sort_order",
+                "source_value=excluded.source_value, enabled=excluded.enabled, sort_order=excluded.sort_order, "
+                "role=excluded.role, device_id=excluded.device_id, device_path=excluded.device_path, "
+                "device_name=excluded.device_name",
                 (
                     cam.id,
                     cam.name,
@@ -215,9 +314,22 @@ class Store:
                     cam.source_value,
                     1 if cam.enabled else 0,
                     cam.sort_order,
+                    cam.role,
+                    cam.device_id,
+                    cam.device_path,
+                    cam.device_name,
                 ),
             )
             self._conn.commit()
+
+    def next_cctv_role(self) -> str:
+        return next_cctv_role([c.role for c in self.list_cameras()])
+
+    def camera_by_role(self, role: str) -> Optional[Camera]:
+        for cam in self.list_cameras():
+            if cam.role == role:
+                return cam
+        return None
 
     def next_camera_sort(self) -> int:
         with self._lock:
@@ -441,6 +553,7 @@ class Store:
 
     @staticmethod
     def _camera(r: sqlite3.Row) -> Camera:
+        keys = r.keys()
         return Camera(
             id=r["id"],
             name=r["name"],
@@ -449,6 +562,11 @@ class Store:
             source_value=r["source_value"],
             enabled=bool(r["enabled"]),
             sort_order=r["sort_order"],
+            role=r["role"] if "role" in keys else "",
+            device_id=r["device_id"] if "device_id" in keys else "",
+            device_path=r["device_path"] if "device_path" in keys else "",
+            device_name=r["device_name"] if "device_name" in keys else "",
+            match_state=MATCH_UNSET,
         )
 
     @staticmethod

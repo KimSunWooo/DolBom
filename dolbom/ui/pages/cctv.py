@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFrame,
@@ -13,6 +11,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dolbom.core.assignment import cctv_cameras
 from dolbom.core.services import AppServices
 from dolbom.models import (
     CAM_DEMO,
@@ -22,7 +21,9 @@ from dolbom.models import (
     CAM_STATUS_LABELS,
     MSG_URGENT,
 )
-from dolbom.ui.dialogs import CameraEditor, confirm
+from dolbom.ui.device_picker import DevicePickerDialog
+from dolbom.ui.dialogs import CameraLabelDialog
+from dolbom.ui.patient_panel import RoomOccupants
 from dolbom.ui.widgets import EmptyState, StatusChip, VideoSurface, make_button
 
 
@@ -40,27 +41,38 @@ class _CameraCard(QFrame):
         self.surface.clicked.connect(lambda: on_open(self.camera_id))
         self.title = QLabel()
         self.title.setObjectName("sectionTitle")
-        meta = QHBoxLayout()
+        self.role = StatusChip("병실 CCTV", "teal")
         self.conn = StatusChip("연결 준비 중", "muted")
         self.send = StatusChip("전송 안 함", "muted")
+        meta = QHBoxLayout()
+        meta.addWidget(self.role)
         meta.addWidget(self.conn)
         meta.addWidget(self.send)
         meta.addStretch()
+        self.device_lab = QLabel()
+        self.device_lab.setObjectName("muted")
+        self.device_lab.setWordWrap(True)
         btns = QHBoxLayout()
-        self.start_btn = make_button("전송 시작", "primary", "이 카메라 영상을 메인 서버(또는 시험 수신기)로 보냅니다.")
+        self.start_btn = make_button("전송 시작", "primary", "이 카메라 영상을 서버(또는 시험 수신기)로 보냅니다.")
         self.stop_btn = make_button("전송 종료", "danger", "이 카메라의 CCTV 전송만 끝냅니다. 수집은 계속됩니다.")
-        self.edit_btn = make_button("수정", tooltip="이름, 위치, 소스를 바꿉니다.")
+        self.pick_btn = make_button("카메라 선택", tooltip="연결된 로컬 장치 목록에서 고릅니다.")
+        self.retry_btn = make_button("재연결", tooltip="같은 장치로 다시 연결합니다.")
+        self.label_btn = make_button("이름·위치")
         self.start_btn.clicked.connect(self._start)
         self.stop_btn.clicked.connect(self._stop)
-        self.edit_btn.clicked.connect(self._edit)
-        btns.addWidget(self.start_btn)
-        btns.addWidget(self.stop_btn)
-        btns.addWidget(self.edit_btn)
+        self.pick_btn.clicked.connect(self._pick)
+        self.retry_btn.clicked.connect(self._retry)
+        self.label_btn.clicked.connect(self._label)
+        for b in (self.start_btn, self.stop_btn, self.pick_btn, self.retry_btn, self.label_btn):
+            btns.addWidget(b)
         btns.addStretch()
+        self.occupants = RoomOccupants(services.patients)
         layout.addWidget(self.surface, 1)
         layout.addWidget(self.title)
         layout.addLayout(meta)
+        layout.addWidget(self.device_lab)
         layout.addLayout(btns)
+        layout.addWidget(self.occupants)
 
     def _start(self) -> None:
         self.services.sessions.start_cctv(self.camera_id)
@@ -68,24 +80,31 @@ class _CameraCard(QFrame):
     def _stop(self) -> None:
         self.services.sessions.end_cctv(self.camera_id)
 
-    def _edit(self) -> None:
+    def _pick(self) -> None:
         cam = self.services.store.get_camera(self.camera_id)
         if not cam:
             return
-        dlg = CameraEditor(self, cam)
+        dlg = DevicePickerDialog(self.services, cam, self)
+        dlg.exec()
+
+    def _retry(self) -> None:
+        self.services.cameras.reopen(self.camera_id)
+
+    def _label(self) -> None:
+        cam = self.services.store.get_camera(self.camera_id)
+        if not cam:
+            return
+        dlg = CameraLabelDialog(self, cam)
         if dlg.exec():
-            result = dlg.result_camera()
-            if result:
-                self.services.store.save_camera(result)
-                self.services.cameras.reload_camera(result.id)
-                if not result.enabled and self.services.sessions.cctv_session(result.id):
-                    self.services.sessions.end_cctv(result.id)
+            self.services.store.save_camera(dlg.apply_to(cam))
+            self.services.cameras_changed.emit()
 
     def refresh_meta(self) -> None:
         cam = self.services.store.get_camera(self.camera_id)
         if not cam:
             return
         self.title.setText(f"{cam.name}  ·  {cam.location or '위치 미입력'}")
+        self.role.set_tone("teal", cam.role_text())
         status, detail, seen = self.services.cameras.last_status(cam.id)
         sending = self.services.sessions.is_sending_camera(cam.id)
         if sending and status not in (CAM_DISCONNECTED, CAM_RECONNECTING):
@@ -100,10 +119,12 @@ class _CameraCard(QFrame):
         elif sending:
             tone = "ok"
         label = CAM_STATUS_LABELS.get(status, status)
-        if detail and status in (CAM_DISCONNECTED, CAM_RECONNECTING):
-            label = f"{label}"
         self.conn.set_tone(tone, label)
         self.send.set_tone("ok" if sending else "muted", "서버 전송 중" if sending else "전송 안 함")
+        src = cam.display_source()
+        if not cam.device_id and cam.source_kind != "rtsp":
+            src = "장치가 아직 연결되지 않았습니다. [카메라 선택]으로 지정하세요."
+        self.device_lab.setText(src)
         live = self.services.cameras.latest(cam.id)
         last_seen = live.captured_at if live else seen
         alert = False
@@ -118,15 +139,23 @@ class _CameraCard(QFrame):
             alert = True
         extra = ""
         if (cam.source_kind == "demo" or self.services.cameras.demo_forced()) and status != CAM_DEMO:
-            extra = " · 데모"
+            extra = " · 데모 모드"
+        disconnected = status in (CAM_DISCONNECTED, CAM_RECONNECTING) and not (
+            cam.source_kind == "demo" or self.services.cameras.demo_forced()
+        )
+        overlay = label + extra
+        if disconnected:
+            overlay = f"{label} · 재연결 또는 장치를 다시 선택하세요"
         self.surface.set_overlay(
             title=f"{cam.name} · {cam.location}",
-            status=label + extra,
-            disconnected=status in (CAM_DISCONNECTED, CAM_RECONNECTING)
-            and not (cam.source_kind == "demo" or self.services.cameras.demo_forced()),
+            status=overlay,
+            disconnected=disconnected,
             last_seen=last_seen,
             alert=alert,
         )
+        if getattr(self, "_occ_loc", None) != cam.location:
+            self._occ_loc = cam.location
+            self.occupants.load_location(cam.location)
 
 
 class CctvPage(QWidget):
@@ -143,10 +172,10 @@ class CctvPage(QWidget):
         self.page_label = QLabel()
         self.prev_btn = make_button("이전", tooltip="이전 카메라 페이지")
         self.next_btn = make_button("다음", tooltip="다음 카메라 페이지")
-        add_btn = make_button("카메라 추가", "primary", "카메라를 추가합니다. 코드 수정은 필요 없습니다.")
-        empty_add = make_button("카메라 추가", "primary", "카메라를 추가합니다.")
-        all_start = make_button("전체 전송 시작", tooltip="사용 중인 모든 카메라 전송을 시작합니다.")
-        all_stop = make_button("전체 전송 종료", "danger", "CCTV 전송만 종료합니다. 화면을 바꿔도 수집은 유지됩니다.")
+        add_btn = make_button("카메라 추가", "primary", "병실 CCTV 슬롯을 추가합니다.")
+        empty_add = make_button("카메라 추가", "primary")
+        all_start = make_button("전체 전송 시작")
+        all_stop = make_button("전체 전송 종료", "danger")
         self.prev_btn.clicked.connect(self._prev)
         self.next_btn.clicked.connect(self._next)
         add_btn.clicked.connect(self._add)
@@ -167,13 +196,13 @@ class CctvPage(QWidget):
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(12)
         self.empty = EmptyState(
-            "등록된 카메라가 없습니다",
-            "병실 영상을 보려면 카메라를 추가하세요. 기본 2대를 쓰도록 준비되어 있으며, 이후에는 화면에서 계속 늘릴 수 있습니다.",
+            "등록된 병실 CCTV가 없습니다",
+            "병실 CCTV 슬롯을 추가한 뒤 [카메라 선택]으로 장치를 지정하세요. 운동·보행 카메라는 이 화면에 나오지 않습니다.",
             empty_add,
         )
         self.detail = QWidget()
         dlay = QVBoxLayout(self.detail)
-        back = make_button("격자 보기로", tooltip="확대 보기를 닫고 목록으로 돌아갑니다.")
+        back = make_button("격자 보기로")
         back.clicked.connect(lambda: self.stack.setCurrentWidget(self.grid_host))
         self.detail_surface = VideoSurface("확대 보기")
         self.detail_surface.setToolTip("")
@@ -185,7 +214,10 @@ class CctvPage(QWidget):
         self.stack.addWidget(self.grid_host)
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.detail)
-        note = QLabel("메뉴를 바꿔도 CCTV 수집과 전송은 계속됩니다. 클라이언트는 낙상을 판정하지 않으며, 서버 이벤트가 오면 해당 칸을 강조합니다.")
+        note = QLabel(
+            "메뉴를 바꿔도 CCTV 수집과 전송은 계속됩니다. "
+            "서버 이벤트에 환자 신원이 없으면 임의의 환자를 연결하지 않습니다."
+        )
         note.setObjectName("muted")
         note.setWordWrap(True)
         root.addLayout(head)
@@ -196,6 +228,10 @@ class CctvPage(QWidget):
         services.cameras.status_changed.connect(lambda *_: self._refresh_meta())
         services.sessions.session_changed.connect(self._refresh_meta)
         services.messages.changed.connect(self._refresh_meta)
+        services.cameras_changed.connect(self.rebuild)
+
+    def _cctv_list(self):
+        return cctv_cameras(self.services.store.list_cameras())
 
     def rebuild(self) -> None:
         while self.grid.count():
@@ -203,7 +239,7 @@ class CctvPage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._cards.clear()
-        cams = self.services.store.list_cameras()
+        cams = self._cctv_list()
         if not cams:
             self.stack.setCurrentWidget(self.empty)
             return
@@ -217,7 +253,7 @@ class CctvPage(QWidget):
             self._cards.append(card)
             self.grid.addWidget(card, 0, i)
         total_pages = max(1, (len(cams) + PAGE_SIZE - 1) // PAGE_SIZE)
-        self.page_label.setText(f"{self._page + 1} / {total_pages} 페이지 · 카메라 {len(cams)}대")
+        self.page_label.setText(f"{self._page + 1} / {total_pages} 페이지 · 병실 CCTV {len(cams)}대")
         self.prev_btn.setEnabled(self._page > 0)
         self.next_btn.setEnabled(self._page + 1 < total_pages)
         if self.stack.currentWidget() is self.detail:
@@ -239,20 +275,18 @@ class CctvPage(QWidget):
         self.rebuild()
 
     def _add(self) -> None:
-        dlg = CameraEditor(self, next_sort=self.services.store.next_camera_sort())
-        if dlg.exec():
-            cam = dlg.result_camera()
-            if cam:
-                self.services.store.save_camera(cam)
-                self.services.cameras.reload_camera(cam.id)
-                self.rebuild()
+        cam = self.services.add_cctv_slot()
+        dlg = DevicePickerDialog(self.services, cam, self)
+        dlg.exec()
+        self.rebuild()
 
     def _all_start(self) -> None:
-        for cam in self.services.store.list_cameras(include_disabled=False):
-            self.services.sessions.start_cctv(cam.id)
+        for cam in self._cctv_list():
+            if cam.enabled:
+                self.services.sessions.start_cctv(cam.id)
 
     def _all_stop(self) -> None:
-        for cam in self.services.store.list_cameras():
+        for cam in self._cctv_list():
             self.services.sessions.end_cctv(cam.id)
 
     def _on_frame(self, frame) -> None:
@@ -268,4 +302,6 @@ class CctvPage(QWidget):
         if self._detail_id:
             cam = self.services.store.get_camera(self._detail_id)
             if cam:
-                self.detail_meta.setText(f"{cam.name} · {cam.location} · 클릭한 카메라는 계속 수집됩니다.")
+                self.detail_meta.setText(
+                    f"{cam.role_text()} · {cam.name} · {cam.location} · 수집은 계속됩니다."
+                )

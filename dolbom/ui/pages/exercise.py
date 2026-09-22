@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from dolbom.core.assignment import clinical_camera
 from dolbom.core.services import AppServices
 from dolbom.media.player import StandardPlayer, classify_item, status_reason
 from dolbom.models import (
@@ -32,10 +33,13 @@ from dolbom.models import (
     MODE_EXERCISE,
     MODE_GAIT,
     MODE_LABELS,
+    ROLE_CLINICAL,
     PlaylistItem,
 )
+from dolbom.ui.device_picker import DevicePickerDialog
 from dolbom.ui.dialogs import PlaylistEditor, confirm
-from dolbom.ui.widgets import EmptyState, StatusChip, VideoSurface, make_button
+from dolbom.ui.patient_panel import PatientPanel
+from dolbom.ui.widgets import StatusChip, VideoSurface, make_button
 
 
 class ExercisePage(QWidget):
@@ -52,16 +56,18 @@ class ExercisePage(QWidget):
         head = QHBoxLayout()
         title = QLabel("운동")
         title.setObjectName("sectionTitle")
-        self.patient = QComboBox()
-        self.camera = QComboBox()
         self.session_chip = StatusChip("세션 없음", "muted")
         self.elapsed = QLabel("경과 00:00")
+        self.cam_name = QLabel("운동·보행 카메라")
+        self.pick_cam = make_button("카메라 선택", tooltip="운동과 보행이 같이 쓰는 공용 카메라를 지정합니다.")
+        self.retry_cam = make_button("재연결")
+        self.pick_cam.clicked.connect(self._pick_camera)
+        self.retry_cam.clicked.connect(self._retry_camera)
         head.addWidget(title)
         head.addSpacing(12)
-        head.addWidget(QLabel("환자"))
-        head.addWidget(self.patient, 1)
-        head.addWidget(QLabel("촬영 카메라"))
-        head.addWidget(self.camera, 1)
+        head.addWidget(self.cam_name, 1)
+        head.addWidget(self.pick_cam)
+        head.addWidget(self.retry_cam)
         head.addWidget(self.session_chip)
         head.addWidget(self.elapsed)
 
@@ -115,6 +121,9 @@ class ExercisePage(QWidget):
         rl = QVBoxLayout(right)
         live_title = QLabel("환자 실시간 영상")
         live_title.setObjectName("sectionTitle")
+        self.live_who = QLabel("선택된 환자가 없습니다.")
+        self.live_who.setStyleSheet("font-size: 16px; font-weight: 600;")
+        self.live_who.setWordWrap(True)
         self.live_view = VideoSurface("카메라를 선택하면 미리보기가 시작됩니다")
         self.live_view.setToolTip("전송 전에 미리보기로 구도를 확인하세요")
         try:
@@ -141,6 +150,7 @@ class ExercisePage(QWidget):
         live_note.setObjectName("muted")
         live_note.setWordWrap(True)
         rl.addWidget(live_title)
+        rl.addWidget(self.live_who)
         rl.addWidget(self.live_view, 1)
         rl.addLayout(chips)
         rl.addLayout(send_row)
@@ -148,6 +158,16 @@ class ExercisePage(QWidget):
 
         split.addWidget(left, 1)
         split.addWidget(right, 1)
+
+        self.patient_panel = PatientPanel(
+            services.patients, session_patient_id_fn=self._session_patient_id
+        )
+        self.patient_panel.selection_changed.connect(self._on_patient)
+        self.patient_panel.change_during_session.connect(self._patient_switch)
+
+        mid = QHBoxLayout()
+        mid.addWidget(self.patient_panel, 0)
+        mid.addLayout(split, 1)
 
         plist = QFrame()
         plist.setObjectName("card")
@@ -182,7 +202,7 @@ class ExercisePage(QWidget):
         pl.addLayout(actions)
 
         root.addLayout(head)
-        root.addLayout(split, 3)
+        root.addLayout(mid, 3)
         root.addWidget(plist, 2)
 
         self.player.frame_ready.connect(lambda f: self.std_view.set_frame(f))
@@ -193,42 +213,70 @@ class ExercisePage(QWidget):
         services.cameras.frame_ready.connect(self._live_frame)
         services.sessions.session_changed.connect(self._refresh_session)
         services.connection_changed.connect(self._on_conn)
-        self.reload_patients()
-        self.reload_cameras()
+        services.cameras_changed.connect(self.reload_clinical_camera)
+        self.reload_clinical_camera()
         self.reload_playlist()
         self._refresh_session()
 
     def shutdown(self) -> None:
         self.player.shutdown()
 
+    def _session_patient_id(self) -> str | None:
+        live = self.services.sessions.clinical()
+        if live and live.mode == MODE_EXERCISE:
+            return live.patient_id
+        return None
+
     def reload_patients(self) -> None:
-        cur = self.patient.currentData()
-        self.patient.blockSignals(True)
-        self.patient.clear()
-        self.patient.addItem("선택 안 함", None)
-        for p in self.services.store.list_patients():
-            label = f"{p.display_name}" + (f" · {p.room}" if p.room else "")
-            self.patient.addItem(label, p.id)
-        if cur is not None:
-            idx = self.patient.findData(cur)
-            if idx >= 0:
-                self.patient.setCurrentIndex(idx)
-        self.patient.blockSignals(False)
+        self.patient_panel.reload()
+
+    def reload_clinical_camera(self) -> None:
+        cam = clinical_camera(self.services.store.list_cameras())
+        if cam is None:
+            self.cam_name.setText("운동·보행 카메라 슬롯 없음")
+            return
+        src = cam.display_source() if cam.device_id or cam.source_kind == "rtsp" else "장치 미지정"
+        self.cam_name.setText(f"{cam.name}  ·  {src}")
 
     def reload_cameras(self) -> None:
-        cur = self.camera.currentData()
-        self.camera.blockSignals(True)
-        self.camera.clear()
-        enabled = [c for c in self.services.store.list_cameras() if c.enabled]
-        if not enabled:
-            self.camera.addItem("등록된 카메라 없음", None)
-        for c in enabled:
-            self.camera.addItem(f"{c.name} · {c.location}", c.id)
-        if cur is not None:
-            idx = self.camera.findData(cur)
-            if idx >= 0:
-                self.camera.setCurrentIndex(idx)
-        self.camera.blockSignals(False)
+        self.reload_clinical_camera()
+
+    def _clinical_id(self) -> str | None:
+        cam = clinical_camera(self.services.store.list_cameras())
+        return cam.id if cam else None
+
+    def _pick_camera(self) -> None:
+        cam = clinical_camera(self.services.store.list_cameras())
+        if not cam:
+            return
+        DevicePickerDialog(self.services, cam, self).exec()
+        self.reload_clinical_camera()
+
+    def _retry_camera(self) -> None:
+        cam_id = self._clinical_id()
+        if cam_id:
+            self.services.cameras.reopen(cam_id)
+
+    def _on_patient(self, patient) -> None:
+        if patient:
+            self.live_who.setText(f"선택 환자  {patient.display_name}  ·  {patient.id}")
+        else:
+            self.live_who.setText("선택된 환자가 없습니다.")
+
+    def _patient_switch(self, patient) -> None:
+        if not confirm(
+            self,
+            "세션 대상 변경",
+            f"진행 중인 세션 대상은 그대로입니다. ‘{patient.display_name}’으로 바꾸려면 세션을 종료해야 합니다.\n종료하고 대상을 바꿀까요?",
+        ):
+            live = self.services.sessions.clinical()
+            if live and live.patient_id:
+                self.patient_panel.select_id(live.patient_id)
+            return
+        self.services.sessions.end_clinical("patient_changed")
+        self.patient_panel.set_frozen(None)
+        self.patient_panel.apply_patient(patient)
+        self._on_patient(patient)
 
     def reload_playlist(self) -> None:
         current_filter = self.filter.currentText() if self.filter.count() else "전체"
@@ -361,10 +409,11 @@ class ExercisePage(QWidget):
         self.reload_playlist()
 
     def _start(self) -> None:
-        cam_id = self.camera.currentData()
+        cam_id = self._clinical_id()
         if not cam_id:
-            QMessageBox.information(self, "카메라 필요", "촬영할 카메라를 선택하세요.")
+            QMessageBox.information(self, "카메라 필요", "운동·보행 공용 카메라를 먼저 선택하세요.")
             return
+        patient = self.patient_panel.selected()
         live = self.services.sessions.clinical()
         if live:
             other = MODE_LABELS.get(live.mode, live.mode)
@@ -375,36 +424,46 @@ class ExercisePage(QWidget):
             ):
                 return
             self.services.sessions.end_clinical("switched")
-        ok, reason, _ = self.services.sessions.start_clinical(
+        ok, reason, sess = self.services.sessions.start_clinical(
             mode=MODE_EXERCISE,
             camera_id=cam_id,
-            patient_id=self.patient.currentData(),
+            patient_id=patient.id if patient else None,
             playlist_item_id=self._current.id if self._current else None,
             title=self._current.title if self._current else None,
             topic=self._current.topic if self._current else None,
         )
         if not ok:
             QMessageBox.information(self, "전송을 시작하지 못했습니다", reason)
+            return
+        self.patient_panel.set_frozen(patient)
 
     def _end(self) -> None:
         live = self.services.sessions.clinical()
         if live and live.mode == MODE_EXERCISE:
             self.services.sessions.end_clinical("ended")
+            self.patient_panel.set_frozen(None)
 
     def _live_frame(self, frame) -> None:
-        cam_id = self.camera.currentData()
+        cam_id = self._clinical_id()
         if cam_id and frame.camera_id == cam_id:
             self.live_view.set_frame(frame.bgr)
 
     def _refresh_session(self) -> None:
         live = self.services.sessions.clinical()
-        cam_id = self.camera.currentData()
+        cam_id = self._clinical_id()
         status, detail, seen = self.services.cameras.last_status(cam_id) if cam_id else ("", "", 0)
         sending = bool(live and live.mode == MODE_EXERCISE)
         if sending:
             self.session_chip.set_tone("ok", "운동 세션 전송 중")
             self.live_chip.set_tone("ok", "서버 전송 중")
             self.send_chip.set_tone("ok", "환자 영상 전송 중")
+            if live.patient_id:
+                try:
+                    p = self.services.patients.get(live.patient_id)
+                    who = f"세션 대상  {p.display_name}  ·  {p.id}" if p else f"세션 대상  {live.patient_id}"
+                except Exception:
+                    who = f"세션 대상  {live.patient_id}"
+                self.live_who.setText(who)
         else:
             self.session_chip.set_tone("muted", "세션 없음 · 미리보기")
             self.live_chip.set_tone("teal", "미리보기 중")
@@ -412,19 +471,22 @@ class ExercisePage(QWidget):
         if status in (CAM_DISCONNECTED, CAM_RECONNECTING):
             self.live_chip.set_tone("urgent", CAM_STATUS_LABELS.get(status, status))
             self.live_view.set_overlay(
-                "환자 카메라",
-                CAM_STATUS_LABELS.get(status, status),
+                "운동·보행 카메라",
+                "연결 끊김 · 재연결 또는 장치를 다시 선택하세요",
                 disconnected=True,
                 last_seen=seen,
             )
+            self.retry_cam.setEnabled(True)
         else:
+            self.retry_cam.setEnabled(False)
             self.live_view.set_overlay(
-                "환자 카메라",
+                "운동·보행 카메라",
                 "서버 전송 중" if sending else "미리보기 중 · 아직 서버로 보내지 않음",
                 disconnected=False,
             )
         self.start_btn.setEnabled(not sending)
         self.end_btn.setEnabled(sending)
+        self.reload_clinical_camera()
 
     def tick(self) -> None:
         live = self.services.sessions.clinical()

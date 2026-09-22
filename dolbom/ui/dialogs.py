@@ -125,6 +125,38 @@ class CameraEditor(QDialog):
         )
 
 
+class CameraLabelDialog(QDialog):
+    def __init__(self, parent=None, camera: Camera | None = None):
+        super().__init__(parent)
+        self.camera = camera
+        self.setWindowTitle("이름·위치")
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.name = QLineEdit(camera.name if camera else "")
+        self.location = QLineEdit(camera.location if camera else "")
+        self.location.setPlaceholderText("예: 101호")
+        form.addRow("이름", self.name)
+        form.addRow("병실·위치", self.location)
+        hint = QLabel("장치는 ‘카메라 선택’에서 고릅니다. 여기서는 표시 이름과 병실만 바꿉니다.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("저장")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("취소")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addLayout(form)
+        layout.addWidget(hint)
+        layout.addWidget(buttons)
+
+    def apply_to(self, camera: Camera) -> Camera:
+        camera.name = self.name.text().strip() or camera.name
+        camera.location = self.location.text().strip()
+        return camera
+
+
 class PlaylistEditor(QDialog):
     def __init__(self, parent=None, item: PlaylistItem | None = None, topics: list[str] | None = None, next_sort: int = 0):
         super().__init__(parent)

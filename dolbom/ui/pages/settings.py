@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import uuid
-
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -22,8 +20,8 @@ from PyQt6.QtWidgets import (
 
 from dolbom import protocol as proto
 from dolbom.core.services import AppServices
-from dolbom.models import MSG_CAMERA_ERROR, MSG_INFO, MSG_SERVER_ERROR, MSG_URGENT, Patient
-from dolbom.ui.dialogs import confirm
+from dolbom.models import MSG_CAMERA_ERROR, MSG_INFO, MSG_SERVER_ERROR, MSG_URGENT
+from dolbom.patients.repository import FIXTURE_NOTE
 from dolbom.ui.widgets import make_button
 
 
@@ -101,27 +99,17 @@ class SettingsPage(QWidget):
         people = QFrame()
         people.setObjectName("card")
         pl = QVBoxLayout(people)
-        pl.addWidget(QLabel("세션 대상자 (최소 정보)"))
-        hint = QLabel("이름과 병실만 저장합니다. 상세 의료정보는 다루지 않습니다.")
+        pl.addWidget(QLabel("환자 정보"))
+        hint = QLabel(
+            "환자 조회·선택은 운동·보행 화면에서 합니다. 등록·수정·삭제는 제공하지 않습니다. "
+            f"현재 원본: {FIXTURE_NOTE}"
+        )
         hint.setObjectName("muted")
+        hint.setWordWrap(True)
         self.plist = QListWidget()
         self.plist.setMinimumHeight(110)
-        row = QHBoxLayout()
-        self.pname = QLineEdit()
-        self.pname.setPlaceholderText("이름")
-        self.proom = QLineEdit()
-        self.proom.setPlaceholderText("병실")
-        add_p = make_button("대상자 추가")
-        del_p = make_button("삭제")
-        add_p.clicked.connect(self._add_patient)
-        del_p.clicked.connect(self._del_patient)
-        row.addWidget(self.pname)
-        row.addWidget(self.proom)
-        row.addWidget(add_p)
-        row.addWidget(del_p)
         pl.addWidget(hint)
         pl.addWidget(self.plist)
-        pl.addLayout(row)
 
         tests = QFrame()
         tests.setObjectName("card")
@@ -165,10 +153,12 @@ class SettingsPage(QWidget):
 
     def reload(self) -> None:
         self.plist.clear()
-        for p in self.services.store.list_patients():
-            item = QListWidgetItem(f"{p.display_name}  ·  {p.room}" if p.room else p.display_name)
-            item.setData(Qt.ItemDataRole.UserRole, p.id)
-            self.plist.addItem(item)
+        try:
+            for p in self.services.patients.search(""):
+                item = QListWidgetItem(f"{p.display_name}  ·  {p.id}  ·  {p.room or '병실 미등록'}")
+                self.plist.addItem(item)
+        except Exception as exc:
+            self.plist.addItem(f"조회 실패: {exc}")
         self.hist.clear()
         for s in self.services.store.list_sessions(20):
             who = s.patient_id or "대상 미지정"
@@ -183,25 +173,3 @@ class SettingsPage(QWidget):
         self.services.store.set_meta("alert_sound", "1" if self.sound.isChecked() else "0")
         self.services.apply_network_settings()
         QMessageBox.information(self, "저장됨", "연결 설정을 적용했습니다. 데모 모드와 실제 연결 상태는 상단 표시를 확인하세요.")
-
-    def _add_patient(self) -> None:
-        name = self.pname.text().strip()
-        if not name:
-            return
-        self.services.store.save_patient(
-            Patient(id=str(uuid.uuid4()), display_name=name, room=self.proom.text().strip())
-        )
-        self.pname.clear()
-        self.proom.clear()
-        self.reload()
-        self.services.patients_changed.emit()
-
-    def _del_patient(self) -> None:
-        item = self.plist.currentItem()
-        if not item:
-            return
-        if not confirm(self, "대상자 삭제", "세션 선택 목록에서만 제거합니다."):
-            return
-        self.services.store.delete_patient(item.data(Qt.ItemDataRole.UserRole))
-        self.reload()
-        self.services.patients_changed.emit()
