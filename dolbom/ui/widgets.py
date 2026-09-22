@@ -212,7 +212,7 @@ class VideoSurface(QWidget):
             font.setBold(False)
             painter.setFont(font)
             status = self._overlay_status
-            if self._disconnected:
+            if not status and self._disconnected:
                 seen = time.strftime("%H:%M:%S", time.localtime(self._last_seen)) if self._last_seen else "—"
                 status = f"연결 끊김 · 마지막 수신 {seen}  · 실시간 아님"
             painter.drawText(bar.adjusted(10, 22, -10, -4), Qt.AlignmentFlag.AlignLeft, status)

@@ -43,6 +43,7 @@ class AppServices(QObject):
         self.receiver: TestReceiver | None = None
         self._conn_state = ""
         self._cam_status: dict[str, str] = {}
+        self._rx_key: tuple | None = None
         self.control.connection_changed.connect(self._on_conn)
         self.control.message_received.connect(self._on_control_msg)
         self.cameras.status_changed.connect(self._on_cam_status)
@@ -67,13 +68,19 @@ class AppServices(QObject):
         udp = int(self.store.get_meta("udp_port", "45004") or 45004)
         demo = self.store.demo_mode()
         use_rx = self.store.get_meta("use_test_receiver", "1") == "1"
+        demo_changed = self.cameras.demo_forced() != demo
         self.cameras.set_demo_forced(demo)
         self.sender.configure(host, udp)
         self.messages.set_sound(self.store.get_meta("alert_sound", "1") == "1")
-        self._stop_receiver()
-        if use_rx:
-            self._ensure_receiver(host, tcp, udp)
+        rx_key = (host, tcp, udp, use_rx)
+        if self._rx_key != rx_key:
+            self._stop_receiver()
+            if use_rx:
+                self._ensure_receiver(host, tcp, udp)
+            self._rx_key = rx_key if (not use_rx or self.receiver is not None) else None
         self.control.configure(host, tcp, enabled=True, test_mode=use_rx)
+        if demo_changed:
+            self.cameras_changed.emit()
 
     def _ensure_receiver(self, host: str, tcp: int, udp: int) -> None:
         try:

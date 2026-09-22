@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 from dolbom.core.capture import CaptureWorker
 from dolbom.core.devices import PhysicalDevice, list_demo_devices, list_local_devices, _id_match
-from dolbom.core.qtutil import keep_thread
+from dolbom.core.qtutil import keep_thread, join_worker
 from dolbom.core.services import AppServices
 from dolbom.models import SOURCE_DEMO, Camera
 from dolbom.ui.widgets import StatusChip, VideoSurface, make_button
@@ -269,7 +269,7 @@ class DevicePickerDialog(QDialog):
         self._preview_worker = None
         if worker:
             worker.stop()
-            worker.wait(2500)
+            join_worker(worker, 2500)
 
     def _choose(self) -> None:
         dev = self._current_device()

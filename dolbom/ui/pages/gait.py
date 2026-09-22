@@ -230,9 +230,10 @@ class GaitPage(QWidget):
             self.send_chip.set_tone("muted", "전송 안 함")
         if status in (CAM_DISCONNECTED, CAM_RECONNECTING):
             self.live_chip.set_tone("urgent", CAM_STATUS_LABELS.get(status, status))
+            self.view.clear_frame()
             self.view.set_overlay(
                 "보행 카메라",
-                "연결 끊김 · 재연결 또는 장치를 다시 선택하세요",
+                detail or "연결 끊김 · 재연결 또는 장치를 다시 선택하세요",
                 True,
                 seen,
             )

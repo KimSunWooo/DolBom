@@ -106,6 +106,9 @@ class Camera:
     def role_text(self) -> str:
         return role_label(self.role)
 
+    def is_demo_source(self) -> bool:
+        return self.source_kind == SOURCE_DEMO or str(self.device_id or "").startswith("demo:")
+
 
 @dataclass
 class Patient:

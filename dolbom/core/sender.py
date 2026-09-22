@@ -99,7 +99,11 @@ class StreamSender(QThread):
             dest = (self._host, self._port)
             for spec in list(self._streams.values()):
                 frame = self._get_frame(spec.camera_id)
-                if frame is None or frame.frame_no == spec.last_sent_no:
+                if frame is None:
+                    continue
+                if spec.last_sent_no >= 0 and frame.frame_no < spec.last_sent_no:
+                    spec.last_sent_no = -1
+                if frame.frame_no == spec.last_sent_no:
                     continue
                 try:
                     packets = self._encode(spec, frame)

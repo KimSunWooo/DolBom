@@ -16,6 +16,7 @@ from dolbom.core.services import AppServices
 from dolbom.models import (
     CAM_DEMO,
     CAM_DISCONNECTED,
+    CAM_PREPARING,
     CAM_RECONNECTING,
     CAM_SENDING,
     CAM_STATUS_LABELS,
@@ -107,7 +108,7 @@ class _CameraCard(QFrame):
         self.role.set_tone("teal", cam.role_text())
         status, detail, seen = self.services.cameras.last_status(cam.id)
         sending = self.services.sessions.is_sending_camera(cam.id)
-        if sending and status not in (CAM_DISCONNECTED, CAM_RECONNECTING):
+        if sending and status not in (CAM_DISCONNECTED, CAM_RECONNECTING, CAM_PREPARING):
             status = CAM_SENDING
         tone = "ok"
         if status in (CAM_DISCONNECTED,):
@@ -124,6 +125,8 @@ class _CameraCard(QFrame):
         src = cam.display_source()
         if not cam.device_id and cam.source_kind != "rtsp":
             src = "장치가 아직 연결되지 않았습니다. [카메라 선택]으로 지정하세요."
+        if detail and status in (CAM_DISCONNECTED, CAM_RECONNECTING, CAM_PREPARING):
+            src = detail
         self.device_lab.setText(src)
         live = self.services.cameras.latest(cam.id)
         last_seen = live.captured_at if live else seen
@@ -138,14 +141,18 @@ class _CameraCard(QFrame):
         ):
             alert = True
         extra = ""
-        if (cam.source_kind == "demo" or self.services.cameras.demo_forced()) and status != CAM_DEMO:
-            extra = " · 데모 모드"
-        disconnected = status in (CAM_DISCONNECTED, CAM_RECONNECTING) and not (
-            cam.source_kind == "demo" or self.services.cameras.demo_forced()
-        )
+        if cam.is_demo_source() and status != CAM_DEMO:
+            extra = " · 데모 모드" if self.services.cameras.demo_forced() else ""
+        disconnected = status in (CAM_DISCONNECTED, CAM_RECONNECTING)
+        no_live = live is None or disconnected
         overlay = label + extra
-        if disconnected:
+        if detail and status in (CAM_DISCONNECTED, CAM_RECONNECTING, CAM_PREPARING):
+            overlay = detail
+        elif disconnected:
             overlay = f"{label} · 재연결 또는 장치를 다시 선택하세요"
+        if no_live:
+            self.surface.clear_frame()
+            self.surface.set_placeholder(overlay or "영상 없음")
         self.surface.set_overlay(
             title=f"{cam.name} · {cam.location}",
             status=overlay,
@@ -256,9 +263,8 @@ class CctvPage(QWidget):
         self.page_label.setText(f"{self._page + 1} / {total_pages} 페이지 · 병실 CCTV {len(cams)}대")
         self.prev_btn.setEnabled(self._page > 0)
         self.next_btn.setEnabled(self._page + 1 < total_pages)
-        if self.stack.currentWidget() is self.detail:
-            return
-        self.stack.setCurrentWidget(self.grid_host)
+        if self.stack.currentWidget() is not self.detail:
+            self.stack.setCurrentWidget(self.grid_host)
         self._refresh_meta()
 
     def _open(self, camera_id: str) -> None:
@@ -302,6 +308,17 @@ class CctvPage(QWidget):
         if self._detail_id:
             cam = self.services.store.get_camera(self._detail_id)
             if cam:
+                status, detail, seen = self.services.cameras.last_status(cam.id)
+                live = self.services.cameras.latest(cam.id)
                 self.detail_meta.setText(
                     f"{cam.role_text()} · {cam.name} · {cam.location} · 수집은 계속됩니다."
+                )
+                if live is None or status in (CAM_DISCONNECTED, CAM_RECONNECTING):
+                    self.detail_surface.clear_frame()
+                overlay = detail or CAM_STATUS_LABELS.get(status, status)
+                self.detail_surface.set_overlay(
+                    f"{cam.name} · {cam.location}",
+                    overlay,
+                    disconnected=status in (CAM_DISCONNECTED, CAM_RECONNECTING),
+                    last_seen=live.captured_at if live else seen,
                 )

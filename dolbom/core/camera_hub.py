@@ -10,6 +10,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from dolbom.core.capture import CaptureWorker
 from dolbom.core.devices import _id_match
+from dolbom.core.qtutil import join_worker
 from dolbom.db.store import Store
 from dolbom.models import CAM_DISABLED, CAM_PREPARING, Camera, VideoFrame
 
@@ -95,14 +96,12 @@ class CameraHub(QObject):
 
     def stop_one(self, camera_id: str) -> None:
         worker = self._workers.pop(camera_id, None)
+        self._latest.pop(camera_id, None)
         if worker is None:
             return
         log.info("hub stop worker camera=%s", camera_id)
         worker.stop()
-        if not worker.wait(2500):
-            log.warning("capture thread did not stop in time id=%s", camera_id)
-            worker.terminate()
-            worker.wait(800)
+        join_worker(worker, 2500)
 
     def start_enabled(self) -> None:
         for cam in self.store.list_cameras():

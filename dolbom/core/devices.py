@@ -5,6 +5,8 @@ from __future__ import annotations
 import glob
 import logging
 import os
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
@@ -14,6 +16,10 @@ log = logging.getLogger("dolbom.devices")
 
 KIND_LOCAL = "local"
 KIND_DEMO = "demo"
+
+_ENUM_LOCK = threading.Lock()
+_ENUM_CACHE: tuple[float, list] = (0.0, [])
+_ENUM_TTL = 1.5
 
 
 @dataclass
@@ -255,12 +261,26 @@ def group_physical(endpoints: Iterable[Endpoint]) -> list[PhysicalDevice]:
 
 
 def list_local_devices() -> list[PhysicalDevice]:
-    if os.path.isdir("/sys/class/video4linux") or glob.glob("/dev/video*"):
-        try:
-            return group_physical(list_linux_endpoints())
-        except Exception:
-            log.exception("v4l enumerate failed")
-    return _scan_indexes()
+    global _ENUM_CACHE
+    now = time.monotonic()
+    cached_at, cached = _ENUM_CACHE
+    if cached and now - cached_at < _ENUM_TTL:
+        return list(cached)
+    with _ENUM_LOCK:
+        now = time.monotonic()
+        cached_at, cached = _ENUM_CACHE
+        if cached and now - cached_at < _ENUM_TTL:
+            return list(cached)
+        if os.path.isdir("/sys/class/video4linux") or glob.glob("/dev/video*"):
+            try:
+                devices = group_physical(list_linux_endpoints())
+            except Exception:
+                log.exception("v4l enumerate failed")
+                devices = _scan_indexes()
+        else:
+            devices = _scan_indexes()
+        _ENUM_CACHE = (time.monotonic(), devices)
+        return list(devices)
 
 
 def _scan_indexes() -> list[PhysicalDevice]:
@@ -403,6 +423,7 @@ def resolve_open_source(camera) -> tuple[object, str, str]:
     path = camera.device_path or ""
     if device_id.startswith("unstable:"):
         return None, MATCH_UNSTABLE, "안정적인 장치 ID가 없어 다시 선택해야 합니다."
+    node = _capture_node(path)
     try:
         devices = list_local_devices()
     except Exception:
@@ -412,7 +433,9 @@ def resolve_open_source(camera) -> tuple[object, str, str]:
         return hits[0].open_path, MATCH_OK, ""
     if len(hits) > 1:
         return None, MATCH_AMBIGUOUS, "같은 식별자의 장치가 여러 대입니다. 다시 선택하세요."
-    node = _capture_node(path) or _capture_node(device_id)
+    if node and os.path.exists(node):
+        return node, MATCH_OK, ""
+    node = _capture_node(device_id)
     if node and os.path.exists(node):
         return node, MATCH_OK, ""
     if device_id:

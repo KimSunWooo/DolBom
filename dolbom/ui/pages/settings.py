@@ -172,4 +172,14 @@ class SettingsPage(QWidget):
         self.services.store.set_meta("udp_port", str(self.udp.value()))
         self.services.store.set_meta("alert_sound", "1" if self.sound.isChecked() else "0")
         self.services.apply_network_settings()
+        if not self.demo.isChecked():
+            still_demo = [c for c in self.services.store.list_cameras() if c.enabled and c.is_demo_source()]
+            if still_demo:
+                QMessageBox.information(
+                    self,
+                    "저장됨",
+                    "데모 모드를 껐습니다. 아직 데모 영상이 할당된 카메라가 있어 실영상을 열 수 없습니다. "
+                    "병실 CCTV·운동·보행 화면의 [카메라 선택]에서 실제 장치를 지정하세요.",
+                )
+                return
         QMessageBox.information(self, "저장됨", "연결 설정을 적용했습니다. 데모 모드와 실제 연결 상태는 상단 표시를 확인하세요.")

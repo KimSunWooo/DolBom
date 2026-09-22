@@ -17,6 +17,8 @@ log = logging.getLogger("dolbom.receiver")
 
 
 class TestReceiver:
+    __test__ = False
+
     def __init__(self, host: str = "127.0.0.1", tcp_port: int = 45757, udp_port: int = 45004):
         self.host = host
         self.tcp_port = tcp_port
@@ -29,10 +31,28 @@ class TestReceiver:
         self.on_tcp: Optional[Callable[[dict], None]] = None
         self._clients: list[socket.socket] = []
         self._lock = threading.Lock()
+        self._tcp_sock: Optional[socket.socket] = None
+        self._udp_sock: Optional[socket.socket] = None
 
     def start(self) -> None:
         if self._running:
             return
+        tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            tcp.bind((self.host, self.tcp_port))
+            tcp.listen(4)
+            tcp.settimeout(0.5)
+            udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            udp.bind((self.host, self.udp_port))
+            udp.settimeout(0.5)
+        except OSError:
+            tcp.close()
+            udp.close()
+            raise
+        self._tcp_sock = tcp
+        self._udp_sock = udp
         self._running = True
         t1 = threading.Thread(target=self._tcp_loop, name="dolbom-tcp", daemon=True)
         t2 = threading.Thread(target=self._udp_loop, name="dolbom-udp", daemon=True)
@@ -49,18 +69,18 @@ class TestReceiver:
                 except OSError:
                     pass
             self._clients.clear()
-        # poke sockets so accept/recv unwind
-        try:
-            s = socket.create_connection((self.host, self.tcp_port), timeout=0.3)
-            s.close()
-        except OSError:
-            pass
-        try:
-            u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            u.sendto(b"x", (self.host, self.udp_port))
-            u.close()
-        except OSError:
-            pass
+        for sock in (self._tcp_sock, self._udp_sock):
+            if sock is None:
+                continue
+            try:
+                sock.close()
+            except OSError:
+                pass
+        self._tcp_sock = None
+        self._udp_sock = None
+        for thread in self._threads:
+            thread.join(1.0)
+        self._threads = []
 
     def broadcast_event(self, payload: dict) -> None:
         data = proto.encode_message(payload)
@@ -73,15 +93,13 @@ class TestReceiver:
                 pass
 
     def _tcp_loop(self) -> None:
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind((self.host, self.tcp_port))
-        srv.listen(4)
-        srv.settimeout(0.5)
+        srv = self._tcp_sock
+        if srv is None:
+            return
         log.info("test TCP listening on %s:%s", self.host, self.tcp_port)
         while self._running:
             try:
-                conn, addr = srv.accept()
+                conn, _addr = srv.accept()
             except socket.timeout:
                 continue
             except OSError:
@@ -89,7 +107,6 @@ class TestReceiver:
             threading.Thread(
                 target=self._client, args=(conn,), name="dolbom-cli", daemon=True
             ).start()
-        srv.close()
 
     def _client(self, conn: socket.socket) -> None:
         with self._lock:
@@ -149,10 +166,9 @@ class TestReceiver:
                 pass
 
     def _udp_loop(self) -> None:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind((self.host, self.udp_port))
-        sock.settimeout(0.5)
+        sock = self._udp_sock
+        if sock is None:
+            return
         log.info("test UDP listening on %s:%s", self.host, self.udp_port)
         while self._running:
             try:
@@ -163,7 +179,6 @@ class TestReceiver:
                 break
             if data:
                 self.udp_packets += 1
-        sock.close()
 
 
 def main(argv: Optional[list[str]] = None) -> int:
