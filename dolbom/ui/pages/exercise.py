@@ -219,6 +219,10 @@ class ExercisePage(QWidget):
         services.cameras_changed.connect(self.reload_clinical_camera)
         self.reload_clinical_camera()
         self.reload_playlist()
+        if services.viewer_mode:
+            for control in (self.pick_cam, self.retry_cam, self.start_btn, self.end_btn):
+                control.hide()
+            self.cam_name.setText("서버 영상 · cam_05")
         self._refresh_session()
 
     def shutdown(self) -> None:
@@ -234,6 +238,9 @@ class ExercisePage(QWidget):
         self.patient_panel.reload()
 
     def reload_clinical_camera(self) -> None:
+        if self.services.viewer_mode:
+            self.cam_name.setText("서버 영상 · cam_05")
+            return
         cam = clinical_camera(self.services.store.list_cameras())
         if cam is None:
             self.cam_name.setText("운동·보행 카메라 슬롯 없음")
@@ -485,7 +492,8 @@ class ExercisePage(QWidget):
             self.retry_cam.setEnabled(False)
             self.live_view.set_overlay(
                 "운동·보행 카메라",
-                "서버 전송 중" if sending else "미리보기 중 · 아직 서버로 보내지 않음",
+                "서버 영상 수신 중" if self.services.viewer_mode else
+                ("서버 전송 중" if sending else "미리보기 중 · 아직 서버로 보내지 않음"),
                 disconnected=False,
             )
         self.start_btn.setEnabled(not sending)

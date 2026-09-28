@@ -3,3 +3,4 @@ PyQt6-Qt6>=6.6
 opencv-python-headless>=4.8
 numpy>=1.26
 pytest>=8.0
+websockets>=14,<17

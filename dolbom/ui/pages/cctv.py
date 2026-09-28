@@ -73,6 +73,10 @@ class _CameraCard(QFrame):
         layout.addLayout(meta)
         layout.addWidget(self.device_lab)
         layout.addLayout(btns)
+        if services.viewer_mode:
+            for control in (self.start_btn, self.stop_btn, self.pick_btn):
+                control.hide()
+            self.send.hide()
         layout.addWidget(self.occupants)
 
     def _start(self) -> None:
@@ -122,12 +126,15 @@ class _CameraCard(QFrame):
         label = CAM_STATUS_LABELS.get(status, status)
         self.conn.set_tone(tone, label)
         self.send.set_tone("ok" if sending else "muted", "서버 전송 중" if sending else "전송 안 함")
-        src = cam.display_source()
-        if not cam.device_id and cam.source_kind != "rtsp":
-            src = "장치가 아직 연결되지 않았습니다. [카메라 선택]으로 지정하세요."
-        if detail and status in (CAM_DISCONNECTED, CAM_RECONNECTING, CAM_PREPARING):
-            src = detail
-        self.device_lab.setText(src)
+        if self.services.viewer_mode:
+            self.device_lab.setText(detail or "메인 서버 영상 수신 중")
+        else:
+            src = cam.display_source()
+            if not cam.device_id and cam.source_kind != "rtsp":
+                src = "장치가 아직 연결되지 않았습니다. [카메라 선택]으로 지정하세요."
+            if detail and status in (CAM_DISCONNECTED, CAM_RECONNECTING, CAM_PREPARING):
+                src = detail
+            self.device_lab.setText(src)
         live = self.services.cameras.latest(cam.id)
         last_seen = live.captured_at if live else seen
         alert = False
@@ -141,7 +148,7 @@ class _CameraCard(QFrame):
         ):
             alert = True
         extra = ""
-        if cam.is_demo_source() and status != CAM_DEMO:
+        if not self.services.viewer_mode and cam.is_demo_source() and status != CAM_DEMO:
             extra = " · 데모 모드" if self.services.cameras.demo_forced() else ""
         disconnected = status in (CAM_DISCONNECTED, CAM_RECONNECTING)
         no_live = live is None or disconnected
@@ -227,6 +234,9 @@ class CctvPage(QWidget):
         )
         note.setObjectName("muted")
         note.setWordWrap(True)
+        if services.viewer_mode:
+            for control in (add_btn, all_start, all_stop, empty_add):
+                control.hide()
         root.addLayout(head)
         root.addWidget(self.stack, 1)
         root.addWidget(note)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import logging
+import os
 import uuid
 from PyQt6.QtCore import QObject, pyqtSignal
 from dolbom import protocol as proto
@@ -14,7 +15,8 @@ from dolbom.core.samples import ensure_samples
 from dolbom.core.sender import StreamSender
 from dolbom.core.session import SessionManager
 from dolbom.db.store import Store
-from dolbom.core.gait_analysis import parse_gait_analysis
+from dolbom.core.gait_analysis import CONDITION_CATALOG, parse_gait_analysis
+from dolbom.core.remote_viewer import RemoteVideo, RemoteResults, server_urls
 from dolbom.models import (
     CAM_DISCONNECTED, GaitAnalysis, MSG_SERVER_ERROR, SOURCE_DEMO,
     SOURCE_DEVICE, SOURCE_RTSP, Camera,
@@ -34,6 +36,10 @@ class AppServices(QObject):
 
     def __init__(self):
         super().__init__()
+        self.viewer_mode = bool(os.getenv("DOLBOM_VIEWER_URL"))
+        self.remote_videos = []
+        self.remote_results = None
+        self.remote_ids = {}
         self.store = Store(db_path())
         self.patients = FixturePatientRepository(db_path())
         self.cameras = CameraHub(self.store)
@@ -60,12 +66,80 @@ class AppServices(QObject):
             self.store.ensure_sample_playlist(items)
         except Exception:
             log.exception("sample video generation failed")
+        if self.viewer_mode:
+            self._start_remote_viewer()
+            return
         self.apply_network_settings()
         self.sender.start()
         self.control.start()
         self.cameras.start_enabled()
 
+    def _start_remote_viewer(self) -> None:
+        base, ws_url = server_urls(os.environ["DOLBOM_VIEWER_URL"])
+        for camera in self.store.list_cameras():
+            if not camera.enabled:
+                continue
+            if camera.role == "clinical":
+                camera_name = "cam_05"
+            elif camera.role.startswith("cctv_"):
+                try:
+                    number = int(camera.role.split("_", 1)[1])
+                except ValueError:
+                    continue
+                if number not in range(1, 5):
+                    continue
+                camera_name = f"cam_{number:02d}"
+            else:
+                continue
+            self.remote_ids[camera_name] = camera.id
+            worker = RemoteVideo(camera.id, camera_name, base)
+            worker.frame_ready.connect(self.cameras._on_frame)
+            worker.status_changed.connect(self.cameras._on_status)
+            self.remote_videos.append(worker)
+            worker.start()
+        self.remote_results = RemoteResults(ws_url)
+        self.remote_results.result_received.connect(self._on_remote_result)
+        self.remote_results.link_changed.connect(self._on_conn)
+        self.remote_results.start()
+
+    def _on_remote_result(self, result: dict) -> None:
+        camera_name = result.get("camera_id")
+        local_id = self.remote_ids.get(camera_name)
+        if local_id is None:
+            return
+        if result.get("type") == proto.MSG_EVENT:
+            event = dict(result)
+            event["camera_id"] = local_id
+            camera = self.store.get_camera(local_id)
+            event["location"] = camera.location if camera else None
+            self.messages.from_server(event)
+            return
+        if result.get("mode") != 1 or camera_name != "cam_05":
+            return
+        detections = result.get("detections") or []
+        if len(detections) != 1:
+            self.clear_gait_analysis()
+            return
+        scores = detections[0].get("raw_data", {}).get("disease_scores")
+        if not isinstance(scores, dict):
+            return
+        # The AI model uses different English keys for these two categories.
+        scores = dict(scores)
+        scores["parkinson"] = scores.get("parkinsons", scores.get("parkinson", 0))
+        scores["myopathy"] = scores.get("myopathic", scores.get("myopathy", 0))
+        conditions = [
+            {"key": key, "label": label, "realtime": float(scores.get(key, 0)) * 100}
+            for key, label in CONDITION_CATALOG
+        ]
+        snap = parse_gait_analysis({"conditions": conditions,
+                                    "note": "메인 서버 AIOutput · 단일 인물의 보행 확률"})
+        if snap is not None:
+            self._gait_analysis = snap
+            self.gait_analysis_changed.emit(snap)
+
     def apply_network_settings(self) -> None:
+        if self.viewer_mode:
+            return
         host = self.store.get_meta("server_host", "127.0.0.1")
         tcp = int(self.store.get_meta("tcp_port", "45757") or 45757)
         udp = int(self.store.get_meta("udp_port", "45004") or 45004)
@@ -155,6 +229,16 @@ class AppServices(QObject):
             )
 
     def shutdown(self) -> None:
+        if self.viewer_mode:
+            if self.remote_results is not None:
+                self.remote_results.stop()
+                self.remote_results.wait(2500)
+            for worker in self.remote_videos:
+                worker.stop()
+                worker.wait(2500)
+            self.patients.close()
+            self.store.close()
+            return
         self.sessions.end_all()
         self.cameras.stop_all()
         self.sender.stop()

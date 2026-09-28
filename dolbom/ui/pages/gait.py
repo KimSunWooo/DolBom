@@ -116,6 +116,10 @@ class GaitPage(QWidget):
         services.gait_analysis_changed.connect(self._on_server_analysis)
         self.reload_patients()
         self.reload_cameras()
+        if services.viewer_mode:
+            for control in (self.pick_cam, self.retry_cam, self.start_btn, self.end_btn):
+                control.hide()
+            self.cam_name.setText("서버 영상 · cam_05")
         self._refresh()
 
     def _session_patient_id(self) -> str | None:
@@ -131,6 +135,9 @@ class GaitPage(QWidget):
         self.reload_clinical_camera()
 
     def reload_clinical_camera(self) -> None:
+        if self.services.viewer_mode:
+            self.cam_name.setText("서버 영상 · cam_05")
+            return
         cam = clinical_camera(self.services.store.list_cameras())
         if cam is None:
             self.cam_name.setText("운동·보행 카메라 슬롯 없음")
@@ -222,6 +229,10 @@ class GaitPage(QWidget):
         self.dashboard.show_analysis(snapshot)
 
     def _refresh_dashboard(self) -> None:
+        if self.services.viewer_mode:
+            snap = self.services.latest_gait_analysis()
+            self.dashboard.show_analysis(snap or empty_analysis("메인 서버 보행 분석을 기다리는 중"))
+            return
         live = self.services.sessions.clinical()
         sending = bool(live and live.mode == MODE_GAIT)
         if not sending:
@@ -275,7 +286,8 @@ class GaitPage(QWidget):
             self.retry_cam.setEnabled(False)
             self.view.set_overlay(
                 "보행 카메라",
-                "서버 전송 중 · 분석은 서버" if sending else "미리보기 중 · 아직 서버로 보내지 않음",
+                "서버 영상·분석 결과 수신 중" if self.services.viewer_mode else
+                ("서버 전송 중 · 분석은 서버" if sending else "미리보기 중 · 아직 서버로 보내지 않음"),
                 False,
             )
         self.start_btn.setEnabled(not sending)

@@ -196,6 +196,10 @@ class MainWindow(QMainWindow):
             self._msg_panel.reload()
 
     def _refresh_banner(self) -> None:
+        if self.services.viewer_mode:
+            self.demo_label.setText("메인 서버 원격 보기 · 카메라 영상은 서버에서 수신합니다.")
+            self.demo_banner.show()
+            return
         demo = self.services.store.demo_mode()
         rx = self.services.store.get_meta("use_test_receiver", "1") == "1"
         if demo or rx:
