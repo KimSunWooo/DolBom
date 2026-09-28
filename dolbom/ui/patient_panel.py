@@ -134,7 +134,7 @@ class PatientPanel(QFrame):
     selection_changed = pyqtSignal(object)  # Patient | None
     change_during_session = pyqtSignal(object)
 
-    def __init__(self, repo: PatientRepository, session_patient_id_fn=None):
+    def __init__(self, repo: PatientRepository, session_patient_id_fn=None, compact: bool = False):
         super().__init__()
         self.repo = repo
         self._session_id_fn = session_patient_id_fn or (lambda: None)
@@ -169,19 +169,23 @@ class PatientPanel(QFrame):
         head.addWidget(self.session_chip)
         head.addStretch()
         layout.addLayout(head)
-        split = QHBoxLayout()
-        left_w = QWidget()
-        left = QVBoxLayout(left_w)
-        left.setContentsMargins(0, 0, 8, 0)
-        left.addWidget(self.list, 1)
-        right_w = QWidget()
-        right = QVBoxLayout(right_w)
-        right.setContentsMargins(8, 0, 0, 0)
-        right.addWidget(self.detail, 1)
-        split.addWidget(left_w, 1)
-        split.addWidget(right_w, 1)
-        layout.addLayout(split, 1)
-        self.setMinimumWidth(520)
+        if compact:
+            self.list.setMaximumHeight(90)
+            layout.addWidget(self.list)
+        else:
+            split = QHBoxLayout()
+            left_w = QWidget()
+            left = QVBoxLayout(left_w)
+            left.setContentsMargins(0, 0, 8, 0)
+            left.addWidget(self.list, 1)
+            right_w = QWidget()
+            right = QVBoxLayout(right_w)
+            right.setContentsMargins(8, 0, 0, 0)
+            right.addWidget(self.detail, 1)
+            split.addWidget(left_w, 1)
+            split.addWidget(right_w, 1)
+            layout.addLayout(split, 1)
+            self.setMinimumWidth(520)
         self.reload()
 
     def selected(self) -> Patient | None:

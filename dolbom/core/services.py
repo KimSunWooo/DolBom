@@ -1,12 +1,9 @@
 """앱 서비스 조립. UI는 이 객체의 시그널만 사용한다."""
 
 from __future__ import annotations
-
 import logging
 import uuid
-
 from PyQt6.QtCore import QObject, pyqtSignal
-
 from dolbom import protocol as proto
 from dolbom.core.assignment import conflict_for
 from dolbom.core.camera_hub import CameraHub
@@ -17,27 +14,23 @@ from dolbom.core.samples import ensure_samples
 from dolbom.core.sender import StreamSender
 from dolbom.core.session import SessionManager
 from dolbom.db.store import Store
-<<<<<<< HEAD
-from dolbom.models import CAM_DISCONNECTED, MSG_SERVER_ERROR, SOURCE_DEMO, SOURCE_DEVICE, SOURCE_RTSP, Camera
-=======
 from dolbom.core.gait_analysis import parse_gait_analysis
-from dolbom.models import CAM_DISCONNECTED, GaitAnalysis, MSG_SERVER_ERROR
->>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
+from dolbom.models import (
+    CAM_DISCONNECTED, GaitAnalysis, MSG_SERVER_ERROR, SOURCE_DEMO,
+    SOURCE_DEVICE, SOURCE_RTSP, Camera,
+)
+
 from dolbom.paths import db_path
 from dolbom.patients.repository import FixturePatientRepository
 from dolbom.tools.test_receiver import TestReceiver
 
 log = logging.getLogger("dolbom.services")
 
-
 class AppServices(QObject):
     connection_changed = pyqtSignal(str, str)
     patients_changed = pyqtSignal()
-<<<<<<< HEAD
     cameras_changed = pyqtSignal()
-=======
     gait_analysis_changed = pyqtSignal(object)
->>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
 
     def __init__(self):
         super().__init__()
@@ -52,11 +45,8 @@ class AppServices(QObject):
         self.receiver: TestReceiver | None = None
         self._conn_state = ""
         self._cam_status: dict[str, str] = {}
-<<<<<<< HEAD
         self._rx_key: tuple | None = None
-=======
         self._gait_analysis: GaitAnalysis | None = None
->>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
         self.control.connection_changed.connect(self._on_conn)
         self.control.message_received.connect(self._on_control_msg)
         self.cameras.status_changed.connect(self._on_cam_status)
@@ -85,6 +75,7 @@ class AppServices(QObject):
         self.cameras.set_demo_forced(demo)
         self.sender.configure(host, udp)
         self.messages.set_sound(self.store.get_meta("alert_sound", "1") == "1")
+
         rx_key = (host, tcp, udp, use_rx)
         if self._rx_key != rx_key:
             self._stop_receiver()
@@ -92,9 +83,9 @@ class AppServices(QObject):
                 self._ensure_receiver(host, tcp, udp)
             self._rx_key = rx_key if (not use_rx or self.receiver is not None) else None
         self.control.configure(host, tcp, enabled=True, test_mode=use_rx)
+
         if demo_changed:
             self.cameras_changed.emit()
-
     def _ensure_receiver(self, host: str, tcp: int, udp: int) -> None:
         try:
             self.receiver = TestReceiver(host, tcp, udp)
@@ -112,6 +103,7 @@ class AppServices(QObject):
         prev = self._conn_state
         self._conn_state = state
         self.connection_changed.emit(state, detail)
+
         if state == "reconnecting" and prev in ("connected", "test"):
             self.messages.add(
                 severity=MSG_SERVER_ERROR,
@@ -136,6 +128,7 @@ class AppServices(QObject):
                 "test" if self.store.get_meta("use_test_receiver", "1") == "1" else "connected",
                 note,
             )
+
         elif msg_type == proto.MSG_SYNC:
             self.control.send(proto.sync_request(self._active()))
 
@@ -181,6 +174,7 @@ class AppServices(QObject):
                 False,
                 "이 장치는 안정적인 식별자를 얻지 못했습니다. 재연결 후 다른 카메라가 열릴 수 있어 선택하지 않았습니다.",
             )
+
         conflict = conflict_for(self.store.list_cameras(), camera_id, device.stable_id)
         if conflict:
             return False, conflict.message
@@ -192,6 +186,7 @@ class AppServices(QObject):
         else:
             cam.source_kind = SOURCE_DEVICE
             cam.source_value = str(device.index)
+
         cam.device_id = device.stable_id
         cam.device_path = device.open_path
         cam.device_name = device.display_name
@@ -204,12 +199,16 @@ class AppServices(QObject):
         cam = self.store.get_camera(camera_id)
         if cam is None:
             return False, "카메라 슬롯을 찾지 못했습니다."
+
         url = url.strip()
         if not url:
             return False, "네트워크 카메라 주소를 입력하세요."
         conflict = conflict_for(self.store.list_cameras(), camera_id, f"rtsp:{url}")
+
         if conflict:
+
             return False, conflict.message
+
         self._stop_active_stream(camera_id)
         self.cameras.stop_one(camera_id)
         cam.source_kind = SOURCE_RTSP
@@ -220,6 +219,7 @@ class AppServices(QObject):
         self.store.save_camera(cam)
         self.cameras.reload_camera(camera_id)
         self.cameras_changed.emit()
+
         return True, "네트워크 카메라를 연결했습니다. 로컬 장치 목록에 자동으로 나타나지는 않습니다."
 
     def _stop_active_stream(self, camera_id: str) -> None:
@@ -230,7 +230,9 @@ class AppServices(QObject):
             self.sessions.end_cctv(camera_id)
 
     def add_cctv_slot(self, location: str = "") -> Camera:
+
         role = self.store.next_cctv_role()
+
         cam = Camera(
             id=str(uuid.uuid4()),
             name=f"병실 CCTV {role.split('_')[-1]}",
@@ -241,7 +243,9 @@ class AppServices(QObject):
             sort_order=self.store.next_camera_sort(),
             role=role,
         )
+
         self.store.save_camera(cam)
         self.cameras.reload_camera(cam.id)
         self.cameras_changed.emit()
+
         return cam
