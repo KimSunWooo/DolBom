@@ -97,6 +97,17 @@ def stylesheet() -> str:
         border: 1px solid {TEAL};
         color: {TEAL_DEEP};
     }}
+    QFrame#cctvAlertRail {{
+        background: {SURFACE};
+        border: 1px solid {LINE};
+        border-left: none;
+        border-right: none;
+        min-height: 72px;
+    }}
+    QFrame#cctvAlertRail[alert="true"] {{
+        background: #F8E5E2;
+        border: 1px solid {URGENT};
+    }}
     QPushButton {{
         background: {SURFACE};
         border: 1px solid {LINE};

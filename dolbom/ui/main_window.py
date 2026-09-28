@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from dolbom.core.services import AppServices
+from dolbom.ui.cctv_alert_rail import CctvAlertRail
 from dolbom.ui.dialogs import MessagesPanel, confirm
 from dolbom.ui.pages.cctv import CctvPage
 from dolbom.ui.pages.exercise import ExercisePage
@@ -99,12 +100,17 @@ class MainWindow(QMainWindow):
         body.addWidget(side)
         body.addWidget(self.pages, 1)
 
+        self.cctv_alerts = CctvAlertRail()
+        self.cctv_alerts.open_cctv.connect(lambda: self.show_page("cctv"))
+
         self.message_bar = MessageBar()
+        self.message_bar.setToolTip("시스템 로그입니다. 병실 CCTV 낙상·특이사항은 위 알람 칸에서 바로 확인합니다.")
         self.message_bar.open_all.connect(self.open_messages)
         self._msg_panel: MessagesPanel | None = None
 
         v.addWidget(top)
         v.addWidget(self.demo_banner)
+        v.addWidget(self.cctv_alerts)
         v.addLayout(body, 1)
         v.addWidget(self.message_bar)
 
@@ -185,6 +191,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_messages(self) -> None:
         self.message_bar.refresh(self.services.messages.unread(), self.services.messages.latest())
+        self.cctv_alerts.refresh(self.services.messages.cctv_alerts())
         if self._msg_panel and self._msg_panel.isVisible():
             self._msg_panel.reload()
 

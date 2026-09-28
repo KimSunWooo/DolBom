@@ -11,7 +11,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+<<<<<<< HEAD
 from dolbom.core.assignment import clinical_camera
+=======
+from dolbom.core.gait_analysis import empty_analysis, make_demo_analysis
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
 from dolbom.core.services import AppServices
 from dolbom.models import (
     CAM_DISCONNECTED,
@@ -22,7 +26,11 @@ from dolbom.models import (
 )
 from dolbom.ui.device_picker import DevicePickerDialog
 from dolbom.ui.dialogs import confirm
+<<<<<<< HEAD
 from dolbom.ui.patient_panel import PatientPanel
+=======
+from dolbom.ui.gait_dashboard import GaitDashboard
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
 from dolbom.ui.widgets import StatusChip, VideoSurface, make_button
 
 
@@ -51,6 +59,7 @@ class GaitPage(QWidget):
         head.addWidget(self.session_chip)
         head.addWidget(self.elapsed)
 
+<<<<<<< HEAD
         self.patient_panel = PatientPanel(
             services.patients, session_patient_id_fn=self._session_patient_id
         )
@@ -63,6 +72,16 @@ class GaitPage(QWidget):
         self.live_who = QLabel("선택된 환자가 없습니다.")
         self.live_who.setStyleSheet("font-size: 16px; font-weight: 600;")
         self.view = VideoSurface("공용 카메라를 선택하면 넓은 미리보기가 표시됩니다")
+=======
+        split = QHBoxLayout()
+        split.setSpacing(12)
+        live = QFrame()
+        live.setObjectName("card")
+        cl = QVBoxLayout(live)
+        live_title = QLabel("실시간 보행 영상")
+        live_title.setObjectName("sectionTitle")
+        self.view = VideoSurface("카메라를 선택하면 넓은 미리보기가 표시됩니다")
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
         self.view.setToolTip("보행 미리보기. 전송 시작 전에 구도를 확인하세요.")
         try:
             self.view.clicked.disconnect()
@@ -84,7 +103,17 @@ class GaitPage(QWidget):
         row.addWidget(self.start_btn)
         row.addWidget(self.end_btn)
         row.addStretch()
+        cl.addWidget(live_title)
+        cl.addWidget(self.view, 1)
+        cl.addLayout(chips)
+        cl.addLayout(row)
+
+        self.dashboard = GaitDashboard()
+        split.addWidget(live, 5)
+        split.addWidget(self.dashboard, 3)
+
         note = QLabel(
+<<<<<<< HEAD
             "보행 지표는 계산하지 않습니다. 운동과 같은 공용 카메라를 쓰며 동시에 두 세션을 만들 수 없습니다."
         )
         note.setObjectName("muted")
@@ -94,19 +123,38 @@ class GaitPage(QWidget):
         cl.addLayout(chips)
         cl.addLayout(row)
         cl.addWidget(note)
+=======
+            "질환별 확률은 메인 서버 분석 결과만 표시합니다. "
+            "이 프로그램은 보행 질환이나 낙상을 판정하지 않습니다. "
+            "운동과 같은 카메라를 쓸 수 있으나 동시에 두 세션을 만들 수는 없습니다."
+        )
+        note.setObjectName("muted")
+        note.setWordWrap(True)
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
 
         body = QHBoxLayout()
         body.addWidget(self.patient_panel, 0)
         body.addWidget(card, 1)
 
         root.addLayout(head)
+<<<<<<< HEAD
         root.addLayout(body, 1)
+=======
+        root.addLayout(split, 1)
+        root.addWidget(note)
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
 
         services.cameras.frame_ready.connect(self._frame)
         services.sessions.session_changed.connect(self._refresh)
         services.messages.changed.connect(self._on_msg)
+<<<<<<< HEAD
         services.cameras_changed.connect(self.reload_clinical_camera)
         self.reload_clinical_camera()
+=======
+        services.gait_analysis_changed.connect(self._on_server_analysis)
+        self.reload_patients()
+        self.reload_cameras()
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
         self._refresh()
 
     def _session_patient_id(self) -> str | None:
@@ -199,12 +247,39 @@ class GaitPage(QWidget):
         live = self.services.sessions.clinical()
         if live and live.mode == MODE_GAIT:
             self.services.sessions.end_clinical("ended")
+<<<<<<< HEAD
             self.patient_panel.set_frozen(None)
+=======
+            self.services.clear_gait_analysis()
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
 
     def _frame(self, frame) -> None:
         cam_id = self._clinical_id()
         if cam_id and frame.camera_id == cam_id:
             self.view.set_frame(frame.bgr)
+
+    def _on_server_analysis(self, snapshot) -> None:
+        if snapshot is None:
+            return
+        self.dashboard.show_analysis(snapshot)
+
+    def _refresh_dashboard(self) -> None:
+        live = self.services.sessions.clinical()
+        sending = bool(live and live.mode == MODE_GAIT)
+        if not sending:
+            self.dashboard.show_analysis(
+                empty_analysis("보행 전송을 시작하면 서버 분석 결과가 이 칸에 표시됩니다.")
+            )
+            return
+        server = self.services.latest_gait_analysis()
+        if server is not None:
+            self.dashboard.show_analysis(server)
+            return
+        if self.services.store.demo_mode():
+            elapsed = time.monotonic() - live.started_mono
+            self.dashboard.show_analysis(make_demo_analysis(elapsed))
+            return
+        self.dashboard.show_analysis(empty_analysis("전송 중 · 서버 분석 결과를 기다리는 중"))
 
     def _refresh(self) -> None:
         live = self.services.sessions.clinical()
@@ -242,12 +317,16 @@ class GaitPage(QWidget):
             self.retry_cam.setEnabled(False)
             self.view.set_overlay(
                 "보행 카메라",
-                "서버 전송 중" if sending else "미리보기 중 · 아직 서버로 보내지 않음",
+                "서버 전송 중 · 분석은 서버" if sending else "미리보기 중 · 아직 서버로 보내지 않음",
                 False,
             )
         self.start_btn.setEnabled(not sending)
         self.end_btn.setEnabled(sending)
+<<<<<<< HEAD
         self.reload_clinical_camera()
+=======
+        self._refresh_dashboard()
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
 
     def _on_msg(self) -> None:
         latest = self.services.messages.latest()

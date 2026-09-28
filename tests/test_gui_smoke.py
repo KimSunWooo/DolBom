@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import QApplication
 from dolbom.core.services import AppServices
 from dolbom.theme import apply_theme
 from dolbom.ui.main_window import MainWindow
-from dolbom.models import MODE_EXERCISE
+from dolbom.models import MODE_EXERCISE, MSG_INFO, MSG_URGENT
 
 
 def test_gui_navigation_keeps_cctv(tmp_path):
@@ -25,10 +25,32 @@ def test_gui_navigation_keeps_cctv(tmp_path):
     assert services.cameras.is_running(clinical)
     win.show_page("exercise")
     win.show_page("gait")
+    assert win.gait_page.dashboard.table.rowCount() == 6
+    assert "분석" in win.gait_page.dashboard.source_lab.text()
     win.show_page("settings")
     win.show_page("cctv")
     assert services.cameras.is_running(cam_id)
+<<<<<<< HEAD
     ok, reason = services.sessions.lease.can_start(clinical, MODE_EXERCISE)
+=======
+    assert "낙상·특이사항 없음" in win.cctv_alerts.title.text()
+    services.messages.add(
+        severity=MSG_URGENT,
+        content="101호 낙상 의심",
+        location="101호",
+        navigate_to="cctv",
+    )
+    assert "101호" in win.cctv_alerts.detail.text() or "낙상" in win.cctv_alerts.title.text()
+    services.messages.add(
+        severity=MSG_INFO,
+        content="운동 안내",
+        navigate_to="exercise",
+    )
+    alerts = services.messages.cctv_alerts()
+    assert any("낙상" in m.content for m in alerts)
+    assert all(m.navigate_to == "cctv" or m.severity == MSG_URGENT for m in alerts)
+    ok, reason = services.sessions.lease.can_start(cam_id, MODE_EXERCISE)
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
     assert ok
     services.sessions.start_clinical(
         mode=MODE_EXERCISE,

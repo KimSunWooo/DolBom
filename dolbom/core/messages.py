@@ -9,6 +9,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
 from dolbom.db.store import Store
+from dolbom.core.gait_analysis import is_cctv_alert
 from dolbom.models import (
     MSG_CAMERA_ERROR,
     MSG_INFO,
@@ -38,6 +39,18 @@ class MessageCenter(QObject):
     def latest(self) -> Optional[AppMessage]:
         items = self.store.list_messages(limit=1)
         return items[0] if items else None
+
+    def cctv_alerts(self, *, unread_only: bool = True, limit: int = 8) -> list[AppMessage]:
+        found: list[AppMessage] = []
+        for msg in self.store.list_messages():
+            if unread_only and msg.acknowledged:
+                continue
+            if not is_cctv_alert(msg):
+                continue
+            found.append(msg)
+            if len(found) >= limit:
+                break
+        return found
 
     def add(
         self,

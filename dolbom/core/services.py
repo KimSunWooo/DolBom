@@ -17,7 +17,12 @@ from dolbom.core.samples import ensure_samples
 from dolbom.core.sender import StreamSender
 from dolbom.core.session import SessionManager
 from dolbom.db.store import Store
+<<<<<<< HEAD
 from dolbom.models import CAM_DISCONNECTED, MSG_SERVER_ERROR, SOURCE_DEMO, SOURCE_DEVICE, SOURCE_RTSP, Camera
+=======
+from dolbom.core.gait_analysis import parse_gait_analysis
+from dolbom.models import CAM_DISCONNECTED, GaitAnalysis, MSG_SERVER_ERROR
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
 from dolbom.paths import db_path
 from dolbom.patients.repository import FixturePatientRepository
 from dolbom.tools.test_receiver import TestReceiver
@@ -28,7 +33,11 @@ log = logging.getLogger("dolbom.services")
 class AppServices(QObject):
     connection_changed = pyqtSignal(str, str)
     patients_changed = pyqtSignal()
+<<<<<<< HEAD
     cameras_changed = pyqtSignal()
+=======
+    gait_analysis_changed = pyqtSignal(object)
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
 
     def __init__(self):
         super().__init__()
@@ -43,7 +52,11 @@ class AppServices(QObject):
         self.receiver: TestReceiver | None = None
         self._conn_state = ""
         self._cam_status: dict[str, str] = {}
+<<<<<<< HEAD
         self._rx_key: tuple | None = None
+=======
+        self._gait_analysis: GaitAnalysis | None = None
+>>>>>>> 36149f9 (보행 질환 확률 칸과 CCTV 낙상 알람을 나눈다)
         self.control.connection_changed.connect(self._on_conn)
         self.control.message_received.connect(self._on_control_msg)
         self.cameras.status_changed.connect(self._on_cam_status)
@@ -110,6 +123,12 @@ class AppServices(QObject):
         msg_type = payload.get("type")
         if msg_type == proto.MSG_EVENT:
             self.messages.from_server(payload)
+        elif msg_type == proto.MSG_GAIT_ANALYSIS:
+            snap = parse_gait_analysis(payload)
+            if snap is None:
+                return
+            self._gait_analysis = snap
+            self.gait_analysis_changed.emit(snap)
         elif msg_type == proto.MSG_HELLO_ACK:
             note = payload.get("note") or "제어 채널 응답을 받았습니다."
             # 생산 서버 연동 완료로 표시하지 않는다.
@@ -119,6 +138,13 @@ class AppServices(QObject):
             )
         elif msg_type == proto.MSG_SYNC:
             self.control.send(proto.sync_request(self._active()))
+
+    def latest_gait_analysis(self) -> GaitAnalysis | None:
+        return self._gait_analysis
+
+    def clear_gait_analysis(self) -> None:
+        self._gait_analysis = None
+        self.gait_analysis_changed.emit(None)
 
     def _on_cam_status(self, camera_id: str, status: str, detail: str) -> None:
         prev = self._cam_status.get(camera_id)

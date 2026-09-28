@@ -28,6 +28,7 @@ MSG_SYNC_REQUEST = "sync.request"
 MSG_SYNC = "session.sync"
 MSG_EVENT = "event"
 MSG_ERROR = "error"
+MSG_GAIT_ANALYSIS = "gait.analysis"
 
 
 class ProtocolError(Exception):

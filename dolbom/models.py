@@ -165,6 +165,27 @@ class AppMessage:
 
 
 @dataclass
+class GaitConditionScore:
+    key: str
+    label: str
+    realtime: float
+    average: float
+
+
+@dataclass
+class GaitAnalysis:
+    conditions: list[GaitConditionScore]
+    source: str = "none"  # none | demo | server
+    updated_at: float = 0.0
+    note: str = ""
+
+    def top(self) -> Optional[GaitConditionScore]:
+        if not self.conditions:
+            return None
+        return max(self.conditions, key=lambda c: c.average)
+
+
+@dataclass
 class VideoFrame:
     camera_id: str
     bgr: Any

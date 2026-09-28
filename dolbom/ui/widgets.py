@@ -228,7 +228,7 @@ class MessageBar(QFrame):
         self.setFixedHeight(64)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
-        self.count = StatusChip("미확인 0", "muted")
+        self.count = StatusChip("시스템 로그 · 미확인 0", "muted")
         self.summary = QLabel("아직 받은 메시지가 없습니다.")
         self.summary.setObjectName("muted")
         self.summary.setWordWrap(True)
@@ -241,7 +241,7 @@ class MessageBar(QFrame):
         layout.addWidget(self.open_btn)
 
     def refresh(self, unread: int, latest: Optional[AppMessage]) -> None:
-        self.count.set_tone("urgent" if unread else "muted", f"미확인 {unread}")
+        self.count.set_tone("urgent" if unread else "muted", f"시스템 로그 · 미확인 {unread}")
         if latest is None:
             self.kind.set_tone("muted", "안내")
             self.summary.setText("아직 받은 메시지가 없습니다.")
