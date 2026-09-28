@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QSlider,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -165,10 +166,6 @@ class ExercisePage(QWidget):
         self.patient_panel.selection_changed.connect(self._on_patient)
         self.patient_panel.change_during_session.connect(self._patient_switch)
 
-        mid = QHBoxLayout()
-        mid.addWidget(self.patient_panel, 0)
-        mid.addLayout(split, 1)
-
         plist = QFrame()
         plist.setObjectName("card")
         pl = QVBoxLayout(plist)
@@ -201,9 +198,15 @@ class ExercisePage(QWidget):
         pl.addWidget(self.list, 1)
         pl.addLayout(actions)
 
+        # Keep both previews across the full content width. Patient management and
+        # playlist editing remain accessible in a short panel below the videos.
+        managers = QTabWidget()
+        managers.addTab(self.patient_panel, "환자 선택·정보")
+        managers.addTab(plist, "재생목록")
+        managers.setMaximumHeight(180)
         root.addLayout(head)
-        root.addLayout(mid, 5)
-        root.addWidget(plist, 1)
+        root.addLayout(split, 1)
+        root.addWidget(managers)
 
         self.player.frame_ready.connect(lambda f: self.std_view.set_frame(f))
         self.player.status_text.connect(self.player_status.setText)

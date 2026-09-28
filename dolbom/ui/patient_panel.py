@@ -144,11 +144,13 @@ class PatientPanel(QFrame):
         self._frozen: Patient | None = None
         self.setObjectName("card")
         layout = QVBoxLayout(self)
-        title = QLabel("환자")
+        title = QLabel("환자 선택" if compact else "환자")
         title.setObjectName("sectionTitle")
         self.source = QLabel(repo.source_label)
         self.source.setObjectName("muted")
         self.source.setWordWrap(True)
+        if compact:
+            self.source.hide()
         self.search = QLineEdit()
         self.search.setPlaceholderText("이름, 환자 ID, 병실 검색")
         self.search.textChanged.connect(self.reload)
@@ -170,8 +172,9 @@ class PatientPanel(QFrame):
         head.addStretch()
         layout.addLayout(head)
         if compact:
-            self.list.setMaximumHeight(90)
+            self.list.setMaximumHeight(42)
             layout.addWidget(self.list)
+            self.setMaximumHeight(160)
         else:
             split = QHBoxLayout()
             left_w = QWidget()

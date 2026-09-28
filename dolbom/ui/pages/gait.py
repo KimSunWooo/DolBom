@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -33,7 +34,7 @@ class GaitPage(QWidget):
         super().__init__()
         self.services = services
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
+        root.setContentsMargins(12, 10, 12, 10)
 
         head = QHBoxLayout()
         title = QLabel("보행")
@@ -97,21 +98,16 @@ class GaitPage(QWidget):
         cl.addLayout(row)
 
         self.dashboard = GaitDashboard()
-        split.addWidget(live, 5)
-        split.addWidget(self.dashboard, 3)
-
-        note = QLabel(
-            "질환별 확률은 메인 서버 분석 결과만 표시합니다. "
-            "이 프로그램은 보행 질환이나 낙상을 판정하지 않습니다. "
-            "운동과 같은 카메라를 쓸 수 있으나 동시에 두 세션을 만들 수는 없습니다."
-        )
-        note.setObjectName("muted")
-        note.setWordWrap(True)
+        analysis_scroll = QScrollArea()
+        analysis_scroll.setWidgetResizable(True)
+        analysis_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        analysis_scroll.setWidget(self.dashboard)
+        split.addWidget(live, 2)
+        split.addWidget(analysis_scroll, 1)
 
         root.addLayout(head)
-        root.addWidget(self.patient_panel)
         root.addLayout(split, 1)
-        root.addWidget(note)
+        root.addWidget(self.patient_panel)
 
         services.cameras.frame_ready.connect(self._frame)
         services.sessions.session_changed.connect(self._refresh)
